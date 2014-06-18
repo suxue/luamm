@@ -13,8 +13,8 @@ extern "C" const char *luamm_reader(lua_State *L, void *data, size_t *size);
 
 namespace luamm {
 
-    class RuntimeError : std::runtime_error {
-        using std::runtime_error::runtime_error;
+    struct RuntimeError : std::runtime_error {
+        RuntimeError(const std::string& msg) : std::runtime_error(msg) {}
     };
 
     typedef lua_Number Number;
@@ -31,9 +31,11 @@ namespace luamm {
         int get() const { return index; }
     };
 
+    // 1 -> stack bottom, top() -> stack top
+    // -1 -> stack top, -top() -> stack bottom
     class StackIndex : public Index {
     public:
-        StackIndex(unsigned i) : Index(i) {}
+        StackIndex(int i) : Index(i) {}
     };
 
     class UpvalueIndex : public Index {
@@ -87,9 +89,8 @@ namespace luamm {
         public:
             class TypeError : public RuntimeError {
                 public:
-                    TypeError(ReturnValue *p, const std::string& msg) :
-                        RuntimeError(std::string("#") +
-                             std::to_string(p->index) + " is not " + msg) {}
+                    TypeError(ReturnValue *p, const std::string& msg)
+               : RuntimeError(std::string("type mismatch, expect") + msg) {}
             };
             ReturnValue(State *s, int i) : state(s), index(i) {}
             operator std::string() {
@@ -160,7 +161,7 @@ namespace luamm {
             lua_pushnumber(ptr, num);
         }
 
-        void push(CFunction func, std::uint8_t upvalues = 0) {
+        void push(CFunction func, int upvalues = 0) {
             lua_pushcclosure(ptr, func, upvalues);
         }
 

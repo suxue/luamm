@@ -10,7 +10,7 @@ int main()
 {
     NewState lua;
     lua.openlibs();
-    auto r = lua.load([]() {
+    auto r = lua.load([]() -> ReaderResult {
         static char buf;
         buf = getchar();
         if (buf != EOF) {
