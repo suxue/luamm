@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <functional>
 #include <utility>
+#include <ostream>
+#include <type_traits>
 
 extern "C" const char *luamm_reader(lua_State *L, void *data, size_t *size);
 
@@ -26,6 +28,11 @@ namespace luamm {
             : func(f), upvalues(uv) {}
     };
 
+    inline std::ostream& operator<<(std::ostream out, CClosure closure) {
+        return out << "luamm::closure(" << closure.func << "("
+                    << closure.upvalues << ")";
+    }
+
     typedef std::pair<size_t, const char*> ReaderResult;
     typedef std::function<ReaderResult()> Reader;
 
@@ -41,78 +48,89 @@ namespace luamm {
             return index;
         }
         operator int() const { return index; }
-        Index& operator++() { return operator+=(1); }
-        Index& operator+=(int x) { // towards top
-            if (index > 0) {
-                index += x;
-                if (index < 0) index = 0;
-            } else {
-                index -= x;
-                if (index > 0) index = 0;
-            }
-            return *this;
-        }
-
-
-        Index& operator-=(int x) { // towards bottom
-            if (index < 0) {
-                index += x;
-                if (index > 0) index = 0;
-            } else {
-                index -= x;
-                if (index < 0) index = 0;
-            }
-            return *this;
-        }
-        Index& operator--() { return operator-=(1); }
+        static Index bottom() { return Index(1); }
+        static Index top() { return Index(-1); }
+        static Index upvalue(int i) { return Index(lua_upvalueindex(i)); }
+        static Index registry() { return Index(LUA_REGISTRYINDEX); }
+        static Index mainThread() { return Index(LUA_RIDX_MAINTHREAD); }
+        static Index globals() { return Index(LUA_RIDX_GLOBALS); }
     };
 
     class Nil {};
-
-    template<typename T> struct VarTypeTrait {
-        static const bool isvar = false;
-        typedef T type;
+    inline std::ostream& operator<<(std::ostream& out, Nil nil) {
+        return out << "luamm::Nil";
     };
 
-    struct ValidVarType {static const bool isvar = true; };
+    template<typename T> struct VarTypeTrait;
+
+    struct ValidVarType {
+        static const bool isvar = true;
+    };
+
+
+    template<typename T>
+    struct PassConvention {
+        enum { issimple = std::is_trivial<T>::value && sizeof(T) <= sizeof(void*)  };
+        typedef typename std::conditional<issimple, T, const T&>::type intype;
+        typedef T& outtype;
+    };
 
     template<>
     struct VarTypeTrait<const char *> : public ValidVarType {
-        typedef const char * type;
+        typedef const char * keytype;
         enum { tid = LUA_TSTRING };
-        static void push(lua_State* st, const type& str) {
+        static void push(lua_State* st, PassConvention<keytype>::intype str) {
             lua_pushstring(st, str);
         }
 
-        static bool get(lua_State* st, type& out, int index) {
+        static bool get(lua_State* st, PassConvention<keytype>::outtype  out, int index) {
             return (out = lua_tostring(st, index)) != nullptr;
         }
     };
 
     template<>
+    struct VarTypeTrait<std::string> : public ValidVarType {
+        typedef std::string keytype;
+        enum { tid = LUA_TSTRING };
+        static void push(lua_State* st, const keytype& str) {
+            return VarTypeTrait<const char*>::push(st, str.c_str());
+        }
+
+        static bool get(lua_State* st, keytype& out, int index) {
+            const char *o = lua_tostring(st, index);
+            if (o) {
+                out = o;
+                return true;
+            } else {
+                return false;
+            }
+        }
+    };
+
+    template<>
     struct VarTypeTrait<Nil> : public ValidVarType {
-        typedef Nil type;
+        typedef Nil keytype;
         enum { tid = LUA_TNIL };
-        static void push(lua_State* st, const type& _) {
+        static void push(lua_State* st, const keytype& _) {
             lua_pushnil(st);
         }
 
-        static bool get(lua_State* st, type& out, int index) {
+        static bool get(lua_State* st, keytype& out, int index) {
             return !!lua_isnil(st, index);
         }
     };
 
     template<>
     struct VarTypeTrait<Number> : public ValidVarType {
-        typedef Number type;
+        typedef Number keytype;
         enum { tid = LUA_TNUMBER };
-        static void push(lua_State* st, const type& num) {
+        static void push(lua_State* st, keytype num) {
             lua_pushnumber(st, num);
         }
 
-        static bool get(lua_State* st, type& out, int index) {
+        static bool get(lua_State* st, keytype& out, int index) {
             int isnum;
-            type num = lua_tonumberx(st, index, &isnum);
+            keytype num = lua_tonumberx(st, index, &isnum);
             if (isnum) {
                 out = num;
                 return true;
@@ -124,13 +142,13 @@ namespace luamm {
 
     template<>
     struct VarTypeTrait<CClosure> : public ValidVarType {
-        typedef CClosure type;
+        typedef CClosure keytype;
         enum { tid = LUA_TFUNCTION };
-        static void push(lua_State* st, const type& closure) {
+        static void push(lua_State* st, const keytype& closure) {
             lua_pushcclosure(st, closure.func, closure.upvalues);
         }
 
-        static bool get(lua_State* st, type& out, int index) {
+        static bool get(lua_State* st, keytype& out, int index) {
             auto f = lua_tocfunction(st, index);
             if (f) {
                 out.func = f;
@@ -144,13 +162,13 @@ namespace luamm {
 
     template<>
     struct VarTypeTrait<bool> : public ValidVarType {
-        typedef bool type;
+        typedef bool keytype;
         enum { tid = LUA_TBOOLEAN };
-        static void push(lua_State* st, const type& b) {
+        static void push(lua_State* st, keytype b) {
             lua_pushboolean(st, b);
         }
 
-        static bool get(lua_State* st, type& out, int index) {
+        static bool get(lua_State* st, keytype& out, int index) {
             out = lua_toboolean(st, index) == 0 ? false : true;
             return true;
         }
@@ -158,81 +176,124 @@ namespace luamm {
 
     template<>
     struct VarTypeTrait<void*> : public ValidVarType {
-        typedef void* type;
+        typedef void* keytype;
         enum { tid = LUA_TLIGHTUSERDATA };
-        static void push(lua_State* st, const type& u) {
+        static void push(lua_State* st, const keytype& u) {
             lua_pushlightuserdata(st, u);
         }
 
-        static bool get(lua_State* st, type& out, int index) {
+        static bool get(lua_State* st, keytype& out, int index) {
             out = lua_touserdata(st, index);
             return !!out;
         }
     };
 
-    class StackIndex : public Index {
-    public:
-        StackIndex(int i) : Index(i) {}
+    template<typename T>
+    struct VarTypeTrait {
+        static const bool isvar = std::is_convertible<T, Number>::value;
+
+        static void push(lua_State* st, const T& u) {
+            VarTypeTrait<Number>::push(st, u);
+        }
+
+        static bool get(lua_State* st, T& out, int index) {
+            Number tmp;
+            if (VarTypeTrait<Number>::get(st, tmp, index)) {
+                out = tmp;
+                return true;
+            } else {
+                return false;
+            }
+        }
     };
 
-    class BottomIndex : public StackIndex {
-    public:
-       BottomIndex() : StackIndex(1) {}
+
+
+    template<typename Key>
+    struct VarSetterGetter;
+
+    struct DummyVarSetterGetter {};
+
+    template<>
+    struct VarSetterGetter<Index> {
+        typedef const Index& Key;
+        // get key to out
+        template<typename T>
+        static bool get(lua_State* st, T& out, Key key) {
+            return VarTypeTrait<T>::get(st, out, key);
+        }
+
+        // set key to _in
+        template<typename T>
+        static void set(lua_State* st, const T& _in, Key key) {
+            VarTypeTrait<T>::push(st, _in);
+            lua_replace(st, key);
+        }
     };
 
-    class TopIndex : public StackIndex {
-    public:
-        TopIndex() : StackIndex(-1) {}
+    template<>
+    struct VarSetterGetter<const std::string&> {
+        typedef const std::string& Key;
+        template<typename T>
+        static bool get(lua_State* st, T& out, const Key& key) {
+            lua_getglobal(st, key.c_str());
+            return VarTypeTrait<T>::get(st, out, Index::top());
+        }
+
+        template<typename T>
+        static void set(lua_State* st, const T& _in, const Key& key) {
+            VarTypeTrait<T>::push(st, _in);
+            lua_setglobal(st, key.c_str());
+        }
     };
 
-    class UpvalueIndex : public Index {
-    public:
-        UpvalueIndex(int i) : Index(lua_upvalueindex(i)) {}
+    template<typename Key>
+    struct VarKeyMatcher {
+        typedef typename std::conditional<std::is_convertible<Key, Index>::value,
+            VarSetterGetter<Index>,
+            typename std::conditional<
+                std::is_convertible<Key, const std::string&>::value,
+                VarSetterGetter<const std::string&>,
+                DummyVarSetterGetter
+            >::type
+        >::type type;
     };
 
-    //! access the registry
-    class RegistryIndex : public Index {
-    public:
-        RegistryIndex() : Index(LUA_REGISTRYINDEX) {}
-    };
+    template<typename Key>
+    struct VarSetterGetter {
+        template<typename T>
+        static bool get(lua_State* st, T& out, Key key) {
+            return VarKeyMatcher<Key>::type::get(st, out, key);
+        }
 
-    //! access items inside the registry table
-    class RIndex : public Index {
-    protected:
-        RIndex(int i) : Index(i) {}
+        template<typename T>
+        static void set(lua_State* st, const T& _in, const Key& key) {
+            typedef typename VarKeyMatcher<Key>::type imp;
+            imp::set(st, _in, key);
+        }
     };
-
-    class MainThreadIndex : public RIndex {
-    public:
-        MainThreadIndex() : RIndex(LUA_RIDX_MAINTHREAD) {}
-    };
-
-    class GlobalsIndex : public RIndex {
-    public:
-        GlobalsIndex() : RIndex(LUA_RIDX_GLOBALS) {}
-    };
-
 
     class State {
     protected:
         lua_State *ptr;
     public:
+        template<typename Key>
         class ReturnValue {
             State *state;
-            Index index;
+            Key key;
         public:
             class TypeError : public RuntimeError {
                 public:
                     TypeError(ReturnValue *p, const std::string& msg)
                : RuntimeError(std::string("type mismatch, expect") + msg) {}
             };
-            ReturnValue(State *s, int i) : state(s), index(i) {}
+            ReturnValue(State *s, Key k) : state(s), key(k) {}
 
             template<typename T>
             operator T&&() {
                 static_assert(VarTypeTrait<T>::isvar, "T is not a valid variable type");
                 T out;
-                if (! VarTypeTrait<T>::get(state->ptr, out, index)) {
+                if (! VarSetterGetter<Key>::get(state->ptr, out, key)) {
                     throw RuntimeError("get error");
                 }
                 return std::move(out);
@@ -241,18 +302,12 @@ namespace luamm {
             template<typename T>
             ReturnValue& operator=(const T& value) {
                 static_assert(VarTypeTrait<T>::isvar, "T is not a valid variable type");
-                auto i = index.get();
-                auto absi = std::abs(i);
-                if (absi < 1 || absi > state->top()) {
-                    throw RuntimeError("not a valid index");
-                }
-                VarTypeTrait<T>::push(state->ptr, value);
-                state->replace(StackIndex(index.get()));
+                VarSetterGetter<Key>::set(state->ptr, value, key);
                 return *this;
             }
 
             int type() {
-                return lua_type(state->ptr, index);
+                return lua_type(state->ptr, key);
             }
         };
 
@@ -263,7 +318,7 @@ namespace luamm {
             return lua_pcall(ptr, nargs, nresults, msgh);
         }
 
-        void copy(Index from, StackIndex to) {
+        void copy(Index from, Index to) {
             lua_copy(ptr, from, to);
         };
 
@@ -281,20 +336,17 @@ namespace luamm {
             lua_createtable(ptr, narray, nother);
         }
 
-        void remove(StackIndex i) {
+        void remove(Index i) {
             lua_remove(ptr, i.get());
         }
 
-        void replace(StackIndex i) {
+        void replace(Index i) {
             lua_replace(ptr, i.get());
         }
 
-        ReturnValue at(Index i) {
-            return ReturnValue(this, i.get());
-        }
-
-        ReturnValue operator[](Index i) {
-            return at(i);
+        template<typename Key>
+        ReturnValue<Key> operator[](Key i) {
+            return ReturnValue<Key>(this, i);
         }
 
         const Number version() {

@@ -21,12 +21,13 @@ int main()
     }, "stdin");
     if (r == LUA_OK) {
         // printf("%s\n", "ok");
+        lua["hello"] = true;
         if (lua.pcall(0, 0) != LUA_OK) {
-            const char * msg  = lua[ BottomIndex() ];
+            const char * msg  = lua[1];
             printf("%s\n", msg);
         }
     } else if (r == LUA_ERRSYNTAX) {
-        const char * msg  = lua[BottomIndex()];
+        const char * msg  = lua[ Index::bottom()];
         printf("%s\n", msg);
     } else { }
     return 0;
