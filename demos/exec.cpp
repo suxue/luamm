@@ -8,7 +8,7 @@ using namespace luamm;
 
 void init(State& lua)
 {
-    lua["hello"] = string("world");
+    lua["hello"] = "world";
     lua["world"] = 1;
 }
 
@@ -17,27 +17,22 @@ int main(int argc, char *argv[])
     NewState lua;
     lua.openlibs();
     init(lua);
-
-    FILE* in = stdin;
-    const char *filename = "stdin";
+    int r;
 
     if (argc == 2) {
-        auto _in = fopen(argv[1], "r");
-        if (_in) {
-            in = _in;
-            filename = argv[1];
-        }
+        auto filename = argv[1];
+        r = lua.loadfile(filename);
+    } else {
+        r = lua.load([]() -> ReaderResult {
+            static char buf;
+            buf = getc(stdin);
+            if (buf != EOF) {
+                return ReaderResult(1, &buf);
+            } else {
+                return ReaderResult(0, nullptr);
+            }
+        }, "stdin");
     }
-
-    auto r = lua.load([in]() -> ReaderResult {
-        static char buf;
-        buf = getc(in);
-        if (buf != EOF) {
-            return ReaderResult(1, &buf);
-        } else {
-            return ReaderResult(0, nullptr);
-        }
-    }, filename);
 
     if (r == LUA_OK) {
         if (lua.pcall(0, 0) != LUA_OK) {

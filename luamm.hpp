@@ -107,6 +107,24 @@ namespace luamm {
         }
     };
 
+    template<std::size_t N>
+    struct VarTypeTrait<char[N]> : public ValidVarType {
+        typedef char keytype[N];
+        enum { tid = LUA_TSTRING };
+        static void push(lua_State* st, const keytype& str) {
+            return VarTypeTrait<const char*>::push(st, (const char*)&str);
+        }
+    };
+
+    template<std::size_t N>
+    struct VarTypeTrait<const char [N]> : public ValidVarType {
+        typedef const char keytype[N];
+        enum { tid = LUA_TSTRING };
+        static void push(lua_State* st, const keytype& str) {
+            return VarTypeTrait<const char*>::push(st, (const char*)&str);
+        }
+    };
+
     template<>
     struct VarTypeTrait<Nil> : public ValidVarType {
         typedef Nil keytype;
@@ -367,6 +385,8 @@ namespace luamm {
             return lua_load(ptr, luamm_reader, &reader, source.c_str(), mode);
         }
 
+        int loadstring(const std::string& str);
+        int loadfile(const std::string& file);
     private:
         State(const State&);
         State& operator=(const State&);
