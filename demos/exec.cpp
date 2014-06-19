@@ -22,12 +22,12 @@ int main()
     if (r == LUA_OK) {
         // printf("%s\n", "ok");
         if (lua.pcall(0, 0) != LUA_OK) {
-            string msg = lua.get(StackIndex(1));
-            printf("%s\n", msg.c_str());
+            const char * msg  = lua[ BottomIndex() ];
+            printf("%s\n", msg);
         }
     } else if (r == LUA_ERRSYNTAX) {
-        string msg = lua.get(StackIndex(1));
-        printf("%s\n", msg.c_str());
+        const char * msg  = lua[BottomIndex()];
+        printf("%s\n", msg);
     } else { }
     return 0;
 }
