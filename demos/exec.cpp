@@ -6,29 +6,48 @@
 using namespace std;
 using namespace luamm;
 
-int main()
+void init(State& lua)
+{
+    lua["hello"] = string("world");
+    lua["world"] = 1;
+}
+
+int main(int argc, char *argv[])
 {
     NewState lua;
     lua.openlibs();
-    auto r = lua.load([]() -> ReaderResult {
+    init(lua);
+
+    FILE* in = stdin;
+    const char *filename = "stdin";
+
+    if (argc == 2) {
+        auto _in = fopen(argv[1], "r");
+        if (_in) {
+            in = _in;
+            filename = argv[1];
+        }
+    }
+
+    auto r = lua.load([in]() -> ReaderResult {
         static char buf;
-        buf = getchar();
+        buf = getc(in);
         if (buf != EOF) {
             return ReaderResult(1, &buf);
         } else {
             return ReaderResult(0, nullptr);
         }
-    }, "stdin");
+    }, filename);
+
     if (r == LUA_OK) {
-        // printf("%s\n", "ok");
-        lua["hello"] = true;
         if (lua.pcall(0, 0) != LUA_OK) {
-            const char * msg  = lua[1];
-            printf("%s\n", msg);
+            const char *msg = lua[1];
+            fprintf(stderr, "%s\n", msg);
+        } else {
+            return 0;
         }
     } else if (r == LUA_ERRSYNTAX) {
         const char * msg  = lua[ Index::bottom()];
         printf("%s\n", msg);
     } else { }
-    return 0;
 }
