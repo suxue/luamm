@@ -32,13 +32,13 @@ int luamm_closure(lua_State *L)
     return (*fp)(st);
 }
 
-int luamm::State::loadstring(const std::string& str)
+void luamm::State::loadstring(const std::string& str)
 {
-    return luaL_loadstring(ptr, str.c_str());
+    load_error(luaL_loadstring(ptr, str.c_str()));
 }
 
-int
+void
 luamm::State::loadfile(const std::string& file)
 {
-    return luaL_loadfile(ptr, file.c_str());
+    load_error(luaL_loadfile(ptr, file.c_str()));
 }

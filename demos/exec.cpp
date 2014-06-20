@@ -32,13 +32,12 @@ int main(int argc, char *argv[])
     NewState lua;
     lua.openlibs();
     init(lua);
-    int r;
 
     if (argc == 2) {
         auto filename = argv[1];
-        r = lua.loadfile(filename);
+        lua.loadfile(filename);
     } else {
-        r = lua.load([]() -> ReaderResult {
+        lua.load([]() -> ReaderResult {
             static char buf;
             buf = getc(stdin);
             if (buf != EOF) {
@@ -49,15 +48,8 @@ int main(int argc, char *argv[])
         }, "stdin");
     }
 
-    if (r == LUA_OK) {
-        if (lua.pcall(0, 0) != LUA_OK) {
-            const char *msg = lua[1];
-            fprintf(stderr, "%s\n", msg);
-        } else {
-            return 0;
-        }
-    } else if (r == LUA_ERRSYNTAX) {
-        const char * msg  = lua[ Index::bottom()];
-        printf("%s\n", msg);
-    } else { }
+    if (lua.pcall(0, 0) != LUA_OK) {
+        const char *msg = lua[1];
+        fprintf(stderr, "%s\n", msg);
+    }
 }

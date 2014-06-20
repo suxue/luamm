@@ -10,6 +10,7 @@
 #include <utility>
 #include <iostream>
 #include <type_traits>
+#include <cassert>
 
 extern "C" {
     const char *luamm_reader(lua_State *L, void *data, size_t *size);
@@ -21,6 +22,18 @@ namespace luamm {
 
     struct RuntimeError : std::runtime_error {
         RuntimeError(const std::string& msg);
+    };
+
+    struct SyntaxError : RuntimeError {
+        SyntaxError(const std::string& msg) : RuntimeError(msg) {}
+    };
+
+    struct MemoryError : RuntimeError {
+        MemoryError(const std::string& msg) : RuntimeError(msg) {}
+    };
+
+    struct GCError : RuntimeError {
+        GCError(const std::string& msg) : RuntimeError(msg) {}
     };
 
     typedef lua_Number Number;
@@ -438,12 +451,13 @@ namespace luamm {
         //! stack size, or top index (because lua table is 1-based)
         int top();
 
-        int load(Reader reader,
+        void load(Reader reader,
                 const std::string source, const char *mode = nullptr);
 
-        int loadstring(const std::string& str);
-        int loadfile(const std::string& file);
+        void loadstring(const std::string& str);
+        void loadfile(const std::string& file);
     private:
+        void load_error(int code);
         State(const State&);
         State& operator=(const State&);
     };
@@ -559,10 +573,28 @@ namespace luamm {
     inline void State::pop(int n) { lua_pop(ptr, n); }
     inline int State::top() { return lua_gettop(ptr); }
 
+    inline void State::load_error(int code) {
+        switch (code) {
+            case LUA_OK:
+                return;
+            case LUA_ERRSYNTAX:
+                {
+                std::string msg = this->operator[](1);
+                pop();
+                throw SyntaxError(msg);
+                }
+            case LUA_ERRMEM:
+                throw MemoryError("");
+            case LUA_ERRGCMM:
+                throw GCError("");
+            default:
+                assert(false);
+        }
+    }
 
-    inline int State::load(Reader reader,
+    inline void State::load(Reader reader,
             const std::string source, const char *mode) {
-        return lua_load(ptr, luamm_reader, &reader, source.c_str(), mode);
+        load_error(lua_load(ptr, luamm_reader, &reader, source.c_str(), mode));
     }
 
     inline NewState::NewState() : State(luaL_newstate()) {
