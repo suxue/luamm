@@ -8,7 +8,7 @@ int main(int argc, char *argv[])
     lua.openlibs();
 
     std::string msg("world");
-    lua["hello"] = [&](State& st) {
+    lua["hello"] = [&](State& st) -> int {
         st.push(msg);
         return 1;
     };

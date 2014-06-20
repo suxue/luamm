@@ -23,7 +23,7 @@ void init(State& lua)
 
     tab[false] = 1;
 
-    string a = lua["world"];
+    const char *a = lua["world"];
     string b = tab["hello"];
 }
 

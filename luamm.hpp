@@ -11,6 +11,7 @@
 #include <iostream>
 #include <type_traits>
 #include <cassert>
+#include <boost/type_traits.hpp>
 
 extern "C" {
     const char *luamm_reader(lua_State *L, void *data, size_t *size);
@@ -138,6 +139,7 @@ namespace luamm {
         }
     };
 
+#ifndef _MSC_VER
     template<>
     struct VarTypeTrait<std::string> : public ValidVarType {
         typedef std::string vartype;
@@ -156,6 +158,7 @@ namespace luamm {
             }
         }
     };
+#endif
 
     template<std::size_t N>
     struct VarTypeTrait<char[N]> : public ValidVarType {
@@ -293,6 +296,10 @@ namespace luamm {
             VarTypeTrait<T>::push(st, _in);
             lua_replace(st, key);
         }
+
+        static Index abs(lua_State* st, Index key) {
+            return lua_absindex(st, key);
+        }
     };
 
     template<>
@@ -311,6 +318,14 @@ namespace luamm {
         static void set(lua_State* st, const T& _in, const Key& key) {
             VarTypeTrait<T>::push(st, _in);
             lua_setglobal(st, key.c_str());
+        }
+
+        static const char *abs(lua_State* st, const char* key) {
+            return key;
+        }
+
+        static const std::string& abs(lua_State* st, const std::string& key) {
+            return key;
         }
     };
 
@@ -347,6 +362,7 @@ namespace luamm {
         Index  index;
     public:
         Table(lua_State *state, Index index) : state(state), index(index) {}
+        Table() : state(nullptr), index(0) {}
 
         template<typename K>
         class ReturnValue {
@@ -355,7 +371,7 @@ namespace luamm {
         public:
             ReturnValue(Table* table, decltype(key) key) : table(table), key(key) {}
             template<typename V>
-            operator V&&();
+            operator V();
 
             template<typename V>
             ReturnValue<K> operator=(const V& v);
@@ -406,6 +422,10 @@ namespace luamm {
             ReturnValue& operator=(const T& value);
 
             int type();
+
+            const char *typeName() {
+                return lua_typename(state->ptr, type());
+            }
         };
 
         State(lua_State *ref);
@@ -424,13 +444,13 @@ namespace luamm {
 
         template<typename T>
         UserData pushUserData() {
-            static_assert(std::is_trivial<T>::value, "T must be trivial");
+            static_assert(boost::has_trivial_copy<T>::value, "T must be trivial");
             auto p = lua_newuserdata(ptr, sizeof(T));
             return UserData(static_cast<UserBlock*>(p), top());
         }
 
         template<typename T>
-        UserData pushUserData(T t) {
+        UserData pushUserData(const T& t) {
             UserData p = pushUserData<T>();
             *(p.get<T>()) = t;
             return p;
@@ -563,7 +583,7 @@ namespace luamm {
 
     template<typename Key>
     State::ReturnValue<Key> State::operator[](Key i) {
-        return ReturnValue<Key>(this, i);
+        return ReturnValue<Key>(this, VarKeyMatcher<Key>::type::abs(ptr, i));
     }
 
     inline const Number State::version() {
@@ -579,7 +599,7 @@ namespace luamm {
                 return;
             case LUA_ERRSYNTAX:
                 {
-                std::string msg = this->operator[](1);
+                const char* msg = this->operator[](1);
                 pop();
                 throw SyntaxError(msg);
                 }
@@ -617,7 +637,7 @@ namespace luamm {
 
     template<typename K>
     template<typename V>
-    Table::ReturnValue<K>::operator V&&() {
+    Table::ReturnValue<K>::operator V() {
         static_assert(VarTypeTrait<V>::isvar, "key is not a var type");
         State st(table->state);
         st.push(key);
