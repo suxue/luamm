@@ -422,6 +422,22 @@ namespace luamm {
             ReturnValue& operator=(const T& value);
 
             int type();
+            bool isnum() { return type() == LUA_TNUMBER; }
+            bool isstr() { return type() == LUA_TSTRING; }
+            bool istab() { return type() == LUA_TTABLE; }
+            bool isud() { return type() == LUA_TUSERDATA; }
+
+            Number dec() {
+                return operator Number();
+            }
+
+            int num() {
+                return (int)operator Number();
+            }
+
+            Table tab() {
+                return operator Table();
+            }
 
             const char *typeName() {
                 return lua_typename(state->ptr, type());
@@ -441,6 +457,11 @@ namespace luamm {
         void push(const T& v);
 
         Table pushTable(int narray = 0, int nother = 0);
+
+        void error(const std::string& msg) {
+            push(msg);
+            lua_error(ptr);
+        }
 
         template<typename T>
         UserData pushUserData() {
