@@ -13,25 +13,18 @@
 
 extern "C" const char *luamm_reader(lua_State *L, void *data, size_t *size);
 
-
 namespace luamm {
 
     struct RuntimeError : std::runtime_error {
-        RuntimeError(const std::string& msg) : std::runtime_error(msg) {}
+        RuntimeError(const std::string& msg);
     };
 
     typedef lua_Number Number;
     struct CClosure {
         lua_CFunction func;
         int upvalues;
-        CClosure(lua_CFunction f = nullptr, int uv = 0)
-            : func(f), upvalues(uv) {}
+        CClosure(lua_CFunction f = nullptr, int uv = 0);
     };
-
-    inline std::ostream& operator<<(std::ostream out, CClosure closure) {
-        return out << "luamm::closure(" << closure.func << "("
-                    << closure.upvalues << ")";
-    }
 
     typedef std::pair<size_t, const char*> ReaderResult;
     typedef std::function<ReaderResult()> Reader;
@@ -40,26 +33,18 @@ namespace luamm {
         int index;
     public:
         Index() : index(0) {}
-        Index(int i) : index(i) {}
-        int get() const {
-            if (index == 0) {
-                throw std::out_of_range("access to index 0 is not permitted");
-            }
-            return index;
-        }
-        operator int() const { return index; }
-        static Index bottom() { return Index(1); }
-        static Index top() { return Index(-1); }
-        static Index upvalue(int i) { return Index(lua_upvalueindex(i)); }
-        static Index registry() { return Index(LUA_REGISTRYINDEX); }
-        static Index mainThread() { return Index(LUA_RIDX_MAINTHREAD); }
-        static Index globals() { return Index(LUA_RIDX_GLOBALS); }
+        Index(int i);
+        int get() const;
+        operator int() const;
+        static Index bottom();
+        static Index top();
+        static Index upvalue(int i);
+        static Index registry();
+        static Index mainThread();
+        static Index globals();
     };
 
     class Nil {};
-    inline std::ostream& operator<<(std::ostream& out, Nil nil) {
-        return out << "luamm::Nil";
-    };
 
     template<typename T> struct VarTypeTrait;
 
@@ -67,23 +52,15 @@ namespace luamm {
         static const bool isvar = true;
     };
 
-
-    template<typename T>
-    struct PassConvention {
-        enum { issimple = std::is_trivial<T>::value && sizeof(T) <= sizeof(void*)  };
-        typedef typename std::conditional<issimple, T, const T&>::type intype;
-        typedef T& outtype;
-    };
-
     template<>
     struct VarTypeTrait<const char *> : public ValidVarType {
         typedef const char * keytype;
         enum { tid = LUA_TSTRING };
-        static void push(lua_State* st, PassConvention<keytype>::intype str) {
+        static void push(lua_State* st, keytype str) {
             lua_pushstring(st, str);
         }
 
-        static bool get(lua_State* st, PassConvention<keytype>::outtype  out, int index) {
+        static bool get(lua_State* st, keytype&  out, int index) {
             return (out = lua_tostring(st, index)) != nullptr;
         }
     };
@@ -225,16 +202,17 @@ namespace luamm {
         }
     };
 
-
-
     template<typename Key>
     struct VarSetterGetter;
 
-    struct DummyVarSetterGetter {};
+    struct DummyVarSetterGetter {
+        static const bool iskey = false;
+    };
 
     template<>
     struct VarSetterGetter<Index> {
         typedef const Index& Key;
+        static const bool iskey = true;
         // get key to out
         template<typename T>
         static bool get(lua_State* st, T& out, Key key) {
@@ -252,6 +230,7 @@ namespace luamm {
     template<>
     struct VarSetterGetter<const std::string&> {
         typedef const std::string& Key;
+        static const bool iskey = true;
         template<typename T>
         static bool get(lua_State* st, T& out, const Key& key) {
             lua_getglobal(st, key.c_str());
@@ -297,93 +276,56 @@ namespace luamm {
     public:
         template<typename Key>
         class ReturnValue {
+            typedef typename VarKeyMatcher<Key>::type Accessor;
+            static_assert(Accessor::iskey, "not a valid key type");
             State *state;
             Key key;
         public:
             class TypeError : public RuntimeError {
-                public:
-                    TypeError(ReturnValue *p, const std::string& msg)
-               : RuntimeError(std::string("type mismatch, expect") + msg) {}
+            public:
+                TypeError(ReturnValue *p, const std::string& msg);
             };
-            ReturnValue(State *s, Key k) : state(s), key(k) {}
+            ReturnValue(State *s, Key k);
 
             template<typename T>
-            operator T&&() {
-                static_assert(VarTypeTrait<T>::isvar, "T is not a valid variable type");
-                T out;
-                if (! VarSetterGetter<Key>::get(state->ptr, out, key)) {
-                    throw RuntimeError("get error");
-                }
-                return std::move(out);
-            }
+            operator T&&();
 
             template<typename T>
-            ReturnValue& operator=(const T& value) {
-                static_assert(VarTypeTrait<T>::isvar, "T is not a valid variable type");
-                VarSetterGetter<Key>::set(state->ptr, value, key);
-                return *this;
-            }
+            ReturnValue& operator=(const T& value);
 
-            int type() {
-                return lua_type(state->ptr, key);
-            }
+            int type();
         };
 
-        State(lua_State *ref) : ptr(ref) {}
+        State(lua_State *ref);
         ~State() {}
 
-        int pcall(int nargs, int nresults, int msgh = 0) {
-            return lua_pcall(ptr, nargs, nresults, msgh);
-        }
+        int pcall(int nargs, int nresults, int msgh = 0);
 
-        void copy(Index from, Index to) {
-            lua_copy(ptr, from, to);
-        };
+        void copy(Index from, Index to);
 
-        void openlibs() {
-            luaL_openlibs(ptr);
-        }
+        void openlibs();
 
         template<typename T>
-        void push(const T& v) {
-            static_assert(VarTypeTrait<T>::isvar, "T is not a valid variable type");
-            VarTypeTrait<T>::push(ptr, v);
-        }
+        void push(const T& v);
 
-        void pushTable(int narray = 0, int nother = 0) {
-            lua_createtable(ptr, narray, nother);
-        }
+        void pushTable(int narray = 0, int nother = 0);
 
-        void remove(Index i) {
-            lua_remove(ptr, i.get());
-        }
+        void remove(Index i);
 
-        void replace(Index i) {
-            lua_replace(ptr, i.get());
-        }
+        void replace(Index i);
 
         template<typename Key>
-        ReturnValue<Key> operator[](Key i) {
-            return ReturnValue<Key>(this, i);
-        }
+        ReturnValue<Key> operator[](Key i);
 
-        const Number version() {
-            return *lua_version(ptr);
-        }
+        const Number version();
 
-        void pop(int n) {
-            lua_pop(ptr, n);
-        }
+        void pop(int n = 1);
 
         //! stack size, or top index (because lua table is 1-based)
-        int top() {
-            return lua_gettop(ptr);
-        }
+        int top();
 
         int load(Reader reader,
-                const std::string source, const char *mode = nullptr) {
-            return lua_load(ptr, luamm_reader, &reader, source.c_str(), mode);
-        }
+                const std::string source, const char *mode = nullptr);
 
         int loadstring(const std::string& str);
         int loadfile(const std::string& file);
@@ -394,13 +336,128 @@ namespace luamm {
 
     class NewState : public State {
     public:
-        NewState() : State(luaL_newstate()) {
-            if (!ptr) { throw RuntimeError("allocate new lua state"); }
-        }
-        ~NewState() {
-            lua_close(ptr);
-        }
+        NewState();
+        ~NewState();
     };
-}
+
+    /******************************************
+     *  IMPLEMENTATION
+    ******************************************/
+    inline RuntimeError::RuntimeError(const std::string& msg)
+        : std::runtime_error(msg) {}
+
+    inline CClosure::CClosure(lua_CFunction f, int uv)
+            : func(f), upvalues(uv) {}
+
+    inline std::ostream& operator<<(std::ostream out, CClosure closure) {
+        return out << "luamm::closure(" << closure.func << "("
+                    << closure.upvalues << ")";
+    }
+
+    inline Index::Index(int i) : index(i) {}
+    inline int Index::get() const {
+        if (index == 0) {
+            throw std::out_of_range("access to index 0 is not permitted");
+        }
+        return index;
+    }
+
+    inline Index::operator int() const { return index; }
+    inline Index Index::bottom() { return Index(1); }
+    inline Index Index::top() { return Index(-1); }
+    inline Index Index::upvalue(int i) { return Index(lua_upvalueindex(i)); }
+    inline Index Index::registry() { return Index(LUA_REGISTRYINDEX); }
+    inline Index Index::mainThread() { return Index(LUA_RIDX_MAINTHREAD); }
+    inline Index Index::globals() { return Index(LUA_RIDX_GLOBALS); }
+
+    inline std::ostream& operator<<(std::ostream& out, Nil nil) {
+        return out << "luamm::Nil";
+    };
+
+    template<typename Key>
+    State::ReturnValue<Key>::TypeError::TypeError(
+                ReturnValue *p, const std::string& msg)
+           : RuntimeError(std::string("type mismatch, expect") + msg) {}
+
+    template<typename Key>
+    State::ReturnValue<Key>::ReturnValue(State *s, Key k)
+        : state(s), key(k) {}
+
+
+    template<typename Key>
+    template<typename T>
+    State::ReturnValue<Key>::operator T&&() {
+        static_assert(VarTypeTrait<T>::isvar, "T is not a valid variable type");
+        T out;
+        if (! Accessor::get(state->ptr, out, key)) {
+            throw RuntimeError("get error");
+        }
+        return std::move(out);
+    }
+
+    template<typename Key>
+    template<typename T>
+    State::ReturnValue<Key>& State::ReturnValue<Key>::operator=(const T& value) {
+        static_assert(VarTypeTrait<T>::isvar, "T is not a valid variable type");
+        Accessor::set(state->ptr, value, key);
+        return *this;
+    }
+
+
+    template<typename Key>
+    inline int State::ReturnValue<Key>::type() {
+        return lua_type(state->ptr, key);
+    }
+
+    inline State::State(lua_State *ref) : ptr(ref) {}
+
+    inline int State::pcall(int nargs, int nresults, int msgh) {
+        return lua_pcall(ptr, nargs, nresults, msgh);
+    }
+
+    inline void State::copy(Index from, Index to) {
+        lua_copy(ptr, from, to);
+    };
+
+    inline void State::openlibs() { luaL_openlibs(ptr); }
+
+    template<typename T>
+    void State::push(const T& v) {
+        static_assert(VarTypeTrait<T>::isvar, "T is not a valid variable type");
+        VarTypeTrait<T>::push(ptr, v);
+    }
+
+    inline void State::pushTable(int narray, int nother) {
+        lua_createtable(ptr, narray, nother);
+    }
+
+    inline void State::remove(Index i) { lua_remove(ptr, i.get()); }
+    inline void State::replace(Index i) { lua_replace(ptr, i.get()); }
+
+    template<typename Key>
+    State::ReturnValue<Key> State::operator[](Key i) {
+        return ReturnValue<Key>(this, i);
+    }
+
+    inline const Number State::version() {
+        return *lua_version(ptr);
+    }
+
+    inline void State::pop(int n) { lua_pop(ptr, n); }
+    inline int State::top() { return lua_gettop(ptr); }
+
+
+    inline int State::load(Reader reader,
+            const std::string source, const char *mode) {
+        return lua_load(ptr, luamm_reader, &reader, source.c_str(), mode);
+    }
+
+    inline NewState::NewState() : State(luaL_newstate()) {
+        if (!ptr) { throw RuntimeError("allocate new lua state"); }
+    }
+
+    inline NewState::~NewState() { lua_close(ptr); }
+
+} // end namespace luamm
 
 #endif
