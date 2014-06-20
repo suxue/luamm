@@ -22,3 +22,6 @@
 
 add_executable(exec exec.cpp)
 target_link_libraries(exec luamm)
+
+add_executable(lambda lambda.cpp)
+target_link_libraries(lambda luamm)

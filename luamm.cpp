@@ -1,5 +1,6 @@
 #include "luamm.hpp"
 #include <string>
+#include <iostream>
 
 using namespace std;
 
@@ -12,6 +13,24 @@ luamm_reader(lua_State *L, void *data, size_t *size)
     return rpair.second;
 }
 
+int luamm_function_cleaner(lua_State* L)
+{
+    luamm::State st(L);
+    lua_getupvalue(L, -1, 1); // +1
+    luamm::UserData ud = st[-1];
+    auto fp = ud.get<luamm::Function*>();
+    delete fp;
+    lua_pop(L, 2);
+    return 0;
+}
+
+int luamm_closure(lua_State *L)
+{
+    luamm::State st(L);
+    luamm::UserData ud = st[luamm::Index::upvalue(1)];
+    auto  fp = *ud.get<luamm::Function*>();
+    return (*fp)(st);
+}
 
 int luamm::State::loadstring(const std::string& str)
 {

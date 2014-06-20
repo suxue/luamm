@@ -10,11 +10,19 @@ using namespace luamm;
 void init(State& lua)
 {
     lua["hello"] = string("hello world, its a nice day, is it?");
+
     lua["world"] = 1;
+
     Table tab = lua.pushTable();
+
     lua["mytab"] = tab;
+
     tab["hello"] = "world";
+
+    string a = lua["world"];
+
     tab[1] = "world";
+
     tab[false] = 1;
     lua.pop();
 }

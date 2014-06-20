@@ -8,10 +8,14 @@
 #include <cstdlib>
 #include <functional>
 #include <utility>
-#include <ostream>
+#include <iostream>
 #include <type_traits>
 
-extern "C" const char *luamm_reader(lua_State *L, void *data, size_t *size);
+extern "C" {
+    const char *luamm_reader(lua_State *L, void *data, size_t *size);
+    int luamm_function_cleaner(lua_State* L);
+    int luamm_closure(lua_State *L);
+}
 
 namespace luamm {
 
@@ -20,11 +24,6 @@ namespace luamm {
     };
 
     typedef lua_Number Number;
-    struct CClosure {
-        lua_CFunction func;
-        int upvalues;
-        CClosure(lua_CFunction f = nullptr, int uv = 0);
-    };
 
     typedef std::pair<size_t, const char*> ReaderResult;
     typedef std::function<ReaderResult()> Reader;
@@ -44,12 +43,73 @@ namespace luamm {
         static Index globals();
     };
 
+    class State;
+    struct CClosure {
+        lua_CFunction func;
+        int upvalues;
+        lua_State *state;
+        Index index;
+        CClosure(lua_CFunction f, int uv = 0, Index index = 0);
+
+        class ReturnValue {
+            CClosure *cl;
+            int n;
+        public:
+            ReturnValue(CClosure *closure, int n) : cl(closure), n(n) {}
+            template<typename T>
+            operator T&&();
+
+            template<typename T>
+            ReturnValue& operator=(const T& t);
+        };
+
+        ReturnValue operator[](int n) {
+            return ReturnValue(this, n);
+        }
+    };
+
+    typedef std::function<int(State&)> Function;
+
     class Nil {};
 
     template<typename T> struct VarTypeTrait;
 
     struct ValidVarType {
         static const bool isvar = true;
+    };
+
+    class UserBlock {};
+    class UserData {
+        friend VarTypeTrait<UserData>;
+        friend VarTypeTrait<Function>;
+        UserBlock* ptr;
+        Index index;
+    public:
+        UserData(UserBlock *p, Index index) : ptr(p), index(index) {}
+        UserData() : ptr(nullptr), index(0) {}
+        template<typename T>
+        T* get() { return reinterpret_cast<T*>(ptr); }
+    };
+
+    template<>
+    struct VarTypeTrait<UserData> : public ValidVarType {
+        typedef UserData vartype;
+        enum { tid = LUA_TUSERDATA };
+        static void push(lua_State* st, vartype ud) {
+            lua_pushnil(st);
+            lua_copy(st, ud.index, -1);
+        }
+
+        static bool get(lua_State* st, vartype&  out, int index) {
+            void *p = lua_touserdata(st, index);
+            if (!p) {
+                return false;
+            } else {
+                out.index = index;
+                out.ptr = static_cast<UserBlock*>(p);
+                return true;
+            }
+        }
     };
 
     template<>
@@ -139,21 +199,31 @@ namespace luamm {
     struct VarTypeTrait<CClosure> : public ValidVarType {
         typedef CClosure vartype;
         enum { tid = LUA_TFUNCTION };
-        static void push(lua_State* st, const vartype& closure) {
-            lua_pushcclosure(st, closure.func, closure.upvalues);
+
+        static void push(lua_State* st, const vartype& c) {
+            lua_settop(st, lua_gettop(st) + c.upvalues);
+            lua_pushcclosure(st, c.func, c.upvalues);
+            vartype& closure = const_cast<vartype&>(c);
+            // FIXME, validate access eontrol
+            closure.index = lua_gettop(st);
+            closure.state = st;
         }
 
         static bool get(lua_State* st, vartype& out, int index) {
             auto f = lua_tocfunction(st, index);
             if (f) {
                 out.func = f;
-                out.upvalues = -1;
+                out.index = index;
+                out.state = st;
                 return true;
             } else {
                 return false;
             }
         }
     };
+
+    template<>
+    struct VarTypeTrait<Function>;
 
     template<>
     struct VarTypeTrait<bool> : public ValidVarType {
@@ -234,7 +304,9 @@ namespace luamm {
         template<typename T>
         static bool get(lua_State* st, T& out, const Key& key) {
             lua_getglobal(st, key.c_str());
-            return VarTypeTrait<T>::get(st, out, Index::top());
+            auto r = VarTypeTrait<T>::get(st, out, Index::top());
+            if (r) lua_pop(st, 1);
+            return r;
         }
 
         template<typename T>
@@ -270,16 +342,9 @@ namespace luamm {
         }
     };
 
-    template<typename T>
-    struct StorageType {
-        typedef typename std::conditional<
-            std::is_trivial<T>::value && sizeof(T) <= 2*sizeof(void*),
-            T, const T&>::type type;
-    };
-
-    class State;
     class Table {
         friend VarTypeTrait<Table>;
+        friend VarTypeTrait<Function>;
         lua_State  *state;
         Index  index;
     public:
@@ -288,7 +353,7 @@ namespace luamm {
         template<typename K>
         class ReturnValue {
             Table *table;
-            typename StorageType<K>::type key;
+            K key;
         public:
             ReturnValue(Table* table, decltype(key) key) : table(table), key(key) {}
             template<typename V>
@@ -328,7 +393,7 @@ namespace luamm {
             typedef typename VarKeyMatcher<Key>::type Accessor;
             static_assert(Accessor::iskey, "not a valid key type");
             State *state;
-            typename StorageType<Key>::type key;
+            Key key;
         public:
             class TypeError : public RuntimeError {
             public:
@@ -358,6 +423,21 @@ namespace luamm {
         void push(const T& v);
 
         Table pushTable(int narray = 0, int nother = 0);
+
+        template<typename T>
+        UserData pushUserData() {
+            static_assert(std::is_trivial<T>::value, "T must be trivial");
+            auto p = lua_newuserdata(ptr, sizeof(T));
+            return UserData(static_cast<UserBlock*>(p), top());
+        }
+
+        template<typename T>
+        UserData pushUserData(T t) {
+            UserData p = pushUserData<T>();
+            *(p.get<T>()) = t;
+            return p;
+        }
+
 
         void remove(Index i);
 
@@ -395,12 +475,9 @@ namespace luamm {
     inline RuntimeError::RuntimeError(const std::string& msg)
         : std::runtime_error(msg) {}
 
-    inline CClosure::CClosure(lua_CFunction f, int uv)
-            : func(f), upvalues(uv) {}
-
-    inline std::ostream& operator<<(std::ostream out, CClosure closure) {
-        return out << "luamm::closure(" << closure.func << "("
-                    << closure.upvalues << ")";
+    inline CClosure::CClosure(lua_CFunction f, int uv, Index index)
+            : func(f), index(index) {
+        upvalues = uv;
     }
 
     inline Index::Index(int i) : index(i) {}
@@ -430,7 +507,8 @@ namespace luamm {
 
     template<typename Key>
     State::ReturnValue<Key>::ReturnValue(State *s, Key k)
-        : state(s), key(k) {}
+        : state(s), key(k) {
+    }
 
 
     template<typename Key>
@@ -536,6 +614,61 @@ namespace luamm {
         out = Table(st, index);
         return true;
     }
+
+    template<typename T>
+    CClosure::ReturnValue::operator T&&() {
+        static_assert(VarTypeTrait<T>::isvar, "T is not a var type");
+        if (lua_getupvalue(cl->state, cl->index, n) == nullptr) {
+            throw std::out_of_range("not a valid upvalue index");
+        }
+        T tmp;
+        if (!VarTypeTrait<T>::get(cl->state, tmp, Index::top())) {
+            throw RuntimeError("get error");
+        }
+        return std::move(tmp);
+    }
+
+    template<typename T>
+    CClosure::ReturnValue& CClosure::ReturnValue::operator=(const T& t) {
+        static_assert(VarTypeTrait<T>::isvar, "T is not a var type");
+        VarTypeTrait<T>::push(cl->state, t);
+        if (!lua_setupvalue(cl->state, cl->index, n)) {
+            lua_pop(cl->state, 1);
+            throw RuntimeError("cannot assign to noexist upvalue");
+        }
+        return *this;
+    }
+
+    template<>
+    struct VarTypeTrait<Function> : public ValidVarType {
+        enum { tid = LUA_TFUNCTION };
+        static void push(lua_State* state, Function func) {
+            // build delegated function
+            State st(state);
+            CClosure cl(luamm_closure, 1);
+            VarTypeTrait<CClosure>::push(state, cl); // +1
+
+            // copy std::function to fp
+            Function *fp = new Function(func);
+
+            // build userdata from fp
+            auto ud = st.pushUserData(fp); // +1
+
+            // set upvalue for closure
+            cl[1] = ud;
+
+            // build cleaner
+            CClosure clcl(&luamm_function_cleaner);
+            VarTypeTrait<CClosure>::push(state, clcl); // +1
+
+            // set gc method for closure
+            Table meta = st.pushTable(); // +1
+            meta["__gc"] = clcl;
+            lua_setmetatable(state, cl.index); // -1
+
+            st.pop(2);
+        }
+    };
 
 } // end namespace luamm
 
