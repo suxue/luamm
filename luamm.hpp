@@ -222,8 +222,6 @@ namespace luamm {
         }
     };
 
-    template<>
-    struct VarTypeTrait<Function>;
 
     template<>
     struct VarTypeTrait<bool> : public ValidVarType {
@@ -253,24 +251,11 @@ namespace luamm {
         }
     };
 
-    template<typename T>
-    struct VarTypeTrait {
-        static const bool isvar = std::is_convertible<T, Number>::value;
 
-        static void push(lua_State* st, const T& u) {
-            VarTypeTrait<Number>::push(st, u);
-        }
-
-        static bool get(lua_State* st, T& out, int index) {
-            Number tmp;
-            if (VarTypeTrait<Number>::get(st, tmp, index)) {
-                out = tmp;
-                return true;
-            } else {
-                return false;
-            }
-        }
+    struct DummyVarTypeTrait {
+        static const bool isvar = false;
     };
+
 
     template<typename Key>
     struct VarSetterGetter;
@@ -667,6 +652,34 @@ namespace luamm {
             lua_setmetatable(state, cl.index); // -1
 
             st.pop(2);
+        }
+    };
+
+    template<typename T>
+    struct VarTypeTrait {
+        // fallback treatment, consider Number or Function(lambdas)
+        typedef typename std::conditional<std::is_convertible<T, Number>::value,
+                    VarTypeTrait<Number>,
+                    typename std::conditional<std::is_convertible<T, Function>::value,
+                        VarTypeTrait<Function>,
+                        DummyVarTypeTrait
+                    >::type
+                >::type type;
+
+        static const bool isvar = type::isvar;
+
+        static void push(lua_State* st, const T& u) {
+            type::push(st, u);
+        }
+
+        static bool get(lua_State* st, T& out, int index) {
+            T tmp;
+            if (VarTypeTrait<type>::get(st, tmp, index)) {
+                out = tmp;
+                return true;
+            } else {
+                return false;
+            }
         }
     };
 

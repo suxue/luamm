@@ -8,11 +8,10 @@ int main(int argc, char *argv[])
     lua.openlibs();
 
     std::string msg("world");
-    Function func = [&](State& st)  {
+    lua["hello"] = [&](State& st) {
         st.push(msg);
         return 1;
     };
-    lua["hello"] = func;
     lua.loadstring("print(hello())");
 
     if (lua.pcall(0, 0) != LUA_OK) {
