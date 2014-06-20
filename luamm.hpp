@@ -70,7 +70,7 @@ namespace luamm {
         public:
             ReturnValue(CClosure *closure, int n) : cl(closure), n(n) {}
             template<typename T>
-            operator T&&();
+            operator T();
 
             template<typename T>
             ReturnValue& operator=(const T& t);
@@ -400,7 +400,7 @@ namespace luamm {
             ReturnValue(State *s, Key k);
 
             template<typename T>
-            operator T&&();
+            operator T();
 
             template<typename T>
             ReturnValue& operator=(const T& value);
@@ -512,13 +512,13 @@ namespace luamm {
 
     template<typename Key>
     template<typename T>
-    State::ReturnValue<Key>::operator T&&() {
+    State::ReturnValue<Key>::operator T() {
         static_assert(VarTypeTrait<T>::isvar, "T is not a valid variable type");
         T out;
         if (! Accessor::get(state->ptr, out, key)) {
             throw RuntimeError("get error");
         }
-        return std::move(out);
+        return out;
     }
 
     template<typename Key>
@@ -633,7 +633,7 @@ namespace luamm {
     }
 
     template<typename T>
-    CClosure::ReturnValue::operator T&&() {
+    CClosure::ReturnValue::operator T() {
         static_assert(VarTypeTrait<T>::isvar, "T is not a var type");
         if (lua_getupvalue(cl->state, cl->index, n) == nullptr) {
             throw std::out_of_range("not a valid upvalue index");

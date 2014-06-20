@@ -19,12 +19,12 @@ void init(State& lua)
 
     tab["hello"] = "world";
 
-    string a = lua["world"];
-
     tab[1] = "world";
 
     tab[false] = 1;
-    lua.pop();
+
+    string a = lua["world"];
+    string b = tab["hello"];
 }
 
 int main(int argc, char *argv[])
