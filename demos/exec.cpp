@@ -2,14 +2,21 @@
 #include <cstdio>
 #include <utility>
 #include <string>
+#include <iostream>
 
 using namespace std;
 using namespace luamm;
 
 void init(State& lua)
 {
-    lua["hello"] = "world";
+    lua["hello"] = string("hello world, its a nice day, is it?");
     lua["world"] = 1;
+    Table tab = lua.pushTable();
+    lua["mytab"] = tab;
+    tab["hello"] = "world";
+    tab[1] = "world";
+    tab[false] = 1;
+    lua.pop();
 }
 
 int main(int argc, char *argv[])

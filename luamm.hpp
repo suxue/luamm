@@ -54,26 +54,26 @@ namespace luamm {
 
     template<>
     struct VarTypeTrait<const char *> : public ValidVarType {
-        typedef const char * keytype;
+        typedef const char * vartype;
         enum { tid = LUA_TSTRING };
-        static void push(lua_State* st, keytype str) {
+        static void push(lua_State* st, vartype str) {
             lua_pushstring(st, str);
         }
 
-        static bool get(lua_State* st, keytype&  out, int index) {
+        static bool get(lua_State* st, vartype&  out, int index) {
             return (out = lua_tostring(st, index)) != nullptr;
         }
     };
 
     template<>
     struct VarTypeTrait<std::string> : public ValidVarType {
-        typedef std::string keytype;
+        typedef std::string vartype;
         enum { tid = LUA_TSTRING };
-        static void push(lua_State* st, const keytype& str) {
+        static void push(lua_State* st, const vartype& str) {
             return VarTypeTrait<const char*>::push(st, str.c_str());
         }
 
-        static bool get(lua_State* st, keytype& out, int index) {
+        static bool get(lua_State* st, vartype& out, int index) {
             const char *o = lua_tostring(st, index);
             if (o) {
                 out = o;
@@ -86,46 +86,46 @@ namespace luamm {
 
     template<std::size_t N>
     struct VarTypeTrait<char[N]> : public ValidVarType {
-        typedef char keytype[N];
+        typedef char vartype[N];
         enum { tid = LUA_TSTRING };
-        static void push(lua_State* st, const keytype& str) {
+        static void push(lua_State* st, const vartype& str) {
             return VarTypeTrait<const char*>::push(st, (const char*)&str);
         }
     };
 
     template<std::size_t N>
     struct VarTypeTrait<const char [N]> : public ValidVarType {
-        typedef const char keytype[N];
+        typedef const char vartype[N];
         enum { tid = LUA_TSTRING };
-        static void push(lua_State* st, const keytype& str) {
+        static void push(lua_State* st, const vartype& str) {
             return VarTypeTrait<const char*>::push(st, (const char*)&str);
         }
     };
 
     template<>
     struct VarTypeTrait<Nil> : public ValidVarType {
-        typedef Nil keytype;
+        typedef Nil vartype;
         enum { tid = LUA_TNIL };
-        static void push(lua_State* st, const keytype& _) {
+        static void push(lua_State* st, const vartype& _) {
             lua_pushnil(st);
         }
 
-        static bool get(lua_State* st, keytype& out, int index) {
+        static bool get(lua_State* st, vartype& out, int index) {
             return !!lua_isnil(st, index);
         }
     };
 
     template<>
     struct VarTypeTrait<Number> : public ValidVarType {
-        typedef Number keytype;
+        typedef Number vartype;
         enum { tid = LUA_TNUMBER };
-        static void push(lua_State* st, keytype num) {
+        static void push(lua_State* st, vartype num) {
             lua_pushnumber(st, num);
         }
 
-        static bool get(lua_State* st, keytype& out, int index) {
+        static bool get(lua_State* st, vartype& out, int index) {
             int isnum;
-            keytype num = lua_tonumberx(st, index, &isnum);
+            vartype num = lua_tonumberx(st, index, &isnum);
             if (isnum) {
                 out = num;
                 return true;
@@ -137,13 +137,13 @@ namespace luamm {
 
     template<>
     struct VarTypeTrait<CClosure> : public ValidVarType {
-        typedef CClosure keytype;
+        typedef CClosure vartype;
         enum { tid = LUA_TFUNCTION };
-        static void push(lua_State* st, const keytype& closure) {
+        static void push(lua_State* st, const vartype& closure) {
             lua_pushcclosure(st, closure.func, closure.upvalues);
         }
 
-        static bool get(lua_State* st, keytype& out, int index) {
+        static bool get(lua_State* st, vartype& out, int index) {
             auto f = lua_tocfunction(st, index);
             if (f) {
                 out.func = f;
@@ -157,13 +157,13 @@ namespace luamm {
 
     template<>
     struct VarTypeTrait<bool> : public ValidVarType {
-        typedef bool keytype;
+        typedef bool vartype;
         enum { tid = LUA_TBOOLEAN };
-        static void push(lua_State* st, keytype b) {
+        static void push(lua_State* st, vartype b) {
             lua_pushboolean(st, b);
         }
 
-        static bool get(lua_State* st, keytype& out, int index) {
+        static bool get(lua_State* st, vartype& out, int index) {
             out = lua_toboolean(st, index) == 0 ? false : true;
             return true;
         }
@@ -171,13 +171,13 @@ namespace luamm {
 
     template<>
     struct VarTypeTrait<void*> : public ValidVarType {
-        typedef void* keytype;
+        typedef void* vartype;
         enum { tid = LUA_TLIGHTUSERDATA };
-        static void push(lua_State* st, const keytype& u) {
+        static void push(lua_State* st, const vartype& u) {
             lua_pushlightuserdata(st, u);
         }
 
-        static bool get(lua_State* st, keytype& out, int index) {
+        static bool get(lua_State* st, vartype& out, int index) {
             out = lua_touserdata(st, index);
             return !!out;
         }
@@ -270,7 +270,56 @@ namespace luamm {
         }
     };
 
+    template<typename T>
+    struct StorageType {
+        typedef typename std::conditional<
+            std::is_trivial<T>::value && sizeof(T) <= 2*sizeof(void*),
+            T, const T&>::type type;
+    };
+
+    class State;
+    class Table {
+        friend VarTypeTrait<Table>;
+        lua_State  *state;
+        Index  index;
+    public:
+        Table(lua_State *state, Index index) : state(state), index(index) {}
+
+        template<typename K>
+        class ReturnValue {
+            Table *table;
+            typename StorageType<K>::type key;
+        public:
+            ReturnValue(Table* table, decltype(key) key) : table(table), key(key) {}
+            template<typename V>
+            operator V&&();
+
+            template<typename V>
+            ReturnValue<K> operator=(const V& v);
+        };
+
+        template<typename K>
+        ReturnValue<K> operator[](K key) {
+            static_assert(VarTypeTrait<K>::isvar, "key is not a var type");
+            return ReturnValue<K>(this, key);
+        }
+    };
+
+
+    template<>
+    struct VarTypeTrait<Table> : public ValidVarType {
+        typedef Table vartype;
+        enum { tid = LUA_TTABLE };
+        static void push(lua_State* st, vartype tab) {
+            lua_pushnil(st);
+            lua_copy(st, tab.index, Index::top());
+        }
+
+        static bool get(lua_State* st, vartype&  out, int index);
+    };
+
     class State {
+        friend Table;
     protected:
         lua_State *ptr;
     public:
@@ -279,7 +328,7 @@ namespace luamm {
             typedef typename VarKeyMatcher<Key>::type Accessor;
             static_assert(Accessor::iskey, "not a valid key type");
             State *state;
-            Key key;
+            typename StorageType<Key>::type key;
         public:
             class TypeError : public RuntimeError {
             public:
@@ -308,7 +357,7 @@ namespace luamm {
         template<typename T>
         void push(const T& v);
 
-        void pushTable(int narray = 0, int nother = 0);
+        Table pushTable(int narray = 0, int nother = 0);
 
         void remove(Index i);
 
@@ -427,8 +476,9 @@ namespace luamm {
         VarTypeTrait<T>::push(ptr, v);
     }
 
-    inline void State::pushTable(int narray, int nother) {
+    inline Table State::pushTable(int narray, int nother) {
         lua_createtable(ptr, narray, nother);
+        return Table(this->ptr, top());
     }
 
     inline void State::remove(Index i) { lua_remove(ptr, i.get()); }
@@ -457,6 +507,35 @@ namespace luamm {
     }
 
     inline NewState::~NewState() { lua_close(ptr); }
+
+    template<typename K>
+    template<typename V>
+    Table::ReturnValue<K> Table::ReturnValue<K>::operator=(const V& v) {
+        static_assert(VarTypeTrait<V>::isvar, "key is not a var type");
+        State st(table->state);
+        // push key
+        st.push(key);
+        st.push(v);
+        lua_settable(table->state, table->index);
+        return *this;
+    }
+
+    template<typename K>
+    template<typename V>
+    Table::ReturnValue<K>::operator V&&() {
+        static_assert(VarTypeTrait<V>::isvar, "key is not a var type");
+        State st(table->state);
+        st.push(key);
+        lua_gettable(table->state, table->index);
+        V v = st[Index::top()];
+        st.pop();
+        return std::move(v);
+    }
+
+    inline bool VarTypeTrait<Table>::get(lua_State* st, vartype&  out, int index) {
+        out = Table(st, index);
+        return true;
+    }
 
 } // end namespace luamm
 
