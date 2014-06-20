@@ -458,7 +458,7 @@ namespace luamm {
 
         Table pushTable(int narray = 0, int nother = 0);
 
-        void error(const std::string& msg) {
+        void error(const char* msg) {
             push(msg);
             lua_error(ptr);
         }
