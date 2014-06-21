@@ -64,6 +64,7 @@ namespace luamm {
         lua_State *state;
         Index index;
         CClosure(lua_CFunction f, int uv = 0, Index index = 0);
+        CClosure() {}
 
         class ReturnValue {
             CClosure *cl;
@@ -284,6 +285,14 @@ namespace luamm {
     struct VarSetterGetter<Index> {
         typedef const Index& Key;
         static const bool iskey = true;
+
+        // push key to stack top
+        static void push(lua_State* st, Index i) {
+            lua_checkstack(st, 1);
+            lua_pushnil(st);
+            lua_copy(st, i, lua_gettop(st)+1);
+        }
+
         // get key to out
         template<typename T>
         static bool get(lua_State* st, T& out, Key key) {
@@ -312,6 +321,11 @@ namespace luamm {
             auto r = VarTypeTrait<T>::get(st, out, Index::top());
             if (r) lua_pop(st, 1);
             return r;
+        }
+
+        // push key to stack top
+        static bool push(lua_State* st, Key key) {
+            lua_getglobal(st, key.c_str());
         }
 
         template<typename T>
@@ -426,6 +440,7 @@ namespace luamm {
             bool isstr() { return type() == LUA_TSTRING; }
             bool istab() { return type() == LUA_TTABLE; }
             bool isud() { return type() == LUA_TUSERDATA; }
+            bool isnil() { return type() == LUA_TNIL; }
 
             Number dec() {
                 return operator Number();
@@ -573,7 +588,11 @@ namespace luamm {
 
     template<typename Key>
     inline int State::ReturnValue<Key>::type() {
-        return lua_type(state->ptr, key);
+        typedef typename VarKeyMatcher<Key>::type type;
+        type::push(state->ptr, key);
+        auto t = lua_type(state->ptr, lua_gettop(state->ptr));
+        lua_pop(state->ptr, 1);
+        return t;
     }
 
     inline State::State(lua_State *ref) : ptr(ref) {}
@@ -591,6 +610,9 @@ namespace luamm {
     template<typename T>
     void State::push(const T& v) {
         static_assert(VarTypeTrait<T>::isvar, "T is not a valid variable type");
+        if (0 == lua_checkstack(ptr, 1)) {
+            throw RuntimeError("cannot ensure extra free stack slot");
+        }
         VarTypeTrait<T>::push(ptr, v);
     }
 

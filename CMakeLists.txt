@@ -23,6 +23,11 @@
 add_library(luamm luamm.cpp)
 target_link_libraries(luamm ${LUA_LIBRARIES})
 
+
+add_executable(luamm_test test.cpp)
+target_link_libraries(luamm_test ${Boost_TEST_EXEC_MONITOR_LIBRARY})
+target_link_libraries(luamm_test luamm)
+
 if(NOT MSVC)
 add_subdirectory(demos)
 endif()
