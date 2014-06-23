@@ -26,12 +26,13 @@
  * unit testing by boost::unit_test
  */
 
+#define BOOST_TEST_MODULE LuammTest
 #include "luamm.hpp"
 #include <boost/test/unit_test.hpp>
 #include <boost/mpl/assert.hpp>
 #include <boost/mpl/not.hpp>
 #include <boost/mpl/logical.hpp>
-#define BOOST_TEST_MODULE LuammTest
+#include <cstdlib>
 
 using namespace luamm;
 using namespace std;
@@ -92,4 +93,15 @@ BOOST_AUTO_TEST_CASE( Choose )
                       >));
 }
 
-int main(){}
+BOOST_AUTO_TEST_CASE( Basic_Load )
+{
+    NewState lua;
+
+    int num = rand();
+    lua.push(num);
+    BOOST_CHECK_EQUAL(Number(lua[-1]), num);
+
+    lua.push("hello");
+    BOOST_CHECK_EQUAL((const char*)lua[-1], "hello");
+}
+

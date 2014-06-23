@@ -4,6 +4,7 @@
 #include <lua.hpp>
 #include <string>
 #include <functional>
+#include <stdexcept>
 #include <type_traits>
 #include <boost/mpl/list.hpp>
 #include <boost/mpl/pair.hpp>
@@ -91,55 +92,7 @@ typedef boost::mpl::list<
             const char*,
             Number
         > varproxies;
-
-/*
- * KeyProxy is a template that translate an Key(a position point to
- * somewhere inside lua state) to a stack position, either valid or pseudo.
- *
- * int get(Key k, bool& success)
- *      - if k is an int (actual position), just return it as is
- *      - otherwise, push that value to the stack and return 0, which
- *      -- implies that caller should clean the stack top after return
- *      - success denotes if the action is completed successfully
- *
- * bool put(Key k)
- *      - push the variable pointed by k to the stack
- *      - check return value to see if completed successfully
- */
-
-class State {
-protected:
-    lua_State *ptr;
-public:
-    State(lua_State *p);
-    lua_State* get();
-
-    template<typename T>
-    void push(T value);
-};
-
-class NewState : public State {
-public:
-    NewState(lua_State *p);
-    ~NewState();
-};
-
-inline State::State(lua_State *p)
-    : ptr(p) {
-}
-
-inline lua_State* State::get() {
-    return ptr;
-}
-
-inline NewState::NewState(lua_State *p)
-    : State(p) {
-}
-
-inline NewState::~NewState() {
-    lua_close(ptr);
-}
-
+struct PlaceHolder {};
 
 template<typename Proxy, typename Var>
 struct PredPush {
@@ -187,9 +140,6 @@ struct PredGet {
     typedef boost::mpl::bool_<sizeof(test<Proxy, Var>(nullptr)) == 1> type;
 };
 
-struct PlaceHolder {};
-
-
 template<template<class, class> class Pred, typename T>
 struct SelectImpl {
     typedef typename boost::mpl::fold<
@@ -207,15 +157,168 @@ struct SelectImpl {
 
 // catch all
 template<typename T>
-struct VarProxy {
+struct VarDispatcher {
     static bool push(lua_State* st, const T& v) {
-        return SelectImpl<PredPush, T>::push(st, v);
+        return SelectImpl<PredPush, T>::type::push(st, v);
     }
 
     static T get(lua_State* st, int index, bool& success) {
-        return SelectImpl<PredGet, T>::get(st, index, success);
+        return SelectImpl<PredGet, T>::type::get(st, index, success);
     }
 };
+
+/*
+ * KeyProxy is a template that translate an Key(a position point to
+ * somewhere inside lua state) to a stack position, either valid or pseudo.
+ *
+ * int get(Key k, bool& success)
+ *      - if k is an int (actual position), just return it as is
+ *      - otherwise, push that value to the stack and return 0, which
+ *      -- implies that caller should clean the stack top after return
+ *      - success denotes if the action is completed successfully
+ *
+ * bool put(Key k)
+ *      - push the variable pointed by k to the stack
+ *      - check return value to see if completed successfully
+ */
+template<typename K>
+struct KeyProxy;
+
+template<>
+struct KeyProxy<int> {
+    static int get(lua_State *st, int i, bool& success) {
+        success = true;
+        return i;
+    }
+
+    static bool put(lua_State *st, int i) {
+        lua_pushnil(st);
+        lua_copy(st, i, -1);
+        return true;
+    }
+};
+
+struct RuntimeError : std::runtime_error {
+    RuntimeError(const std::string& s) : std::runtime_error(s) {}
+};
+
+struct KeyGetError : RuntimeError {
+    KeyGetError() : RuntimeError("") {}
+};
+
+struct VarGetError : RuntimeError {
+    VarGetError() : RuntimeError("") {}
+};
+
+struct VarPushError : RuntimeError {
+    VarPushError() : RuntimeError("") {}
+};
+
+class Variant {
+    int  index;
+    lua_State* state;
+public:
+    Variant(lua_State* st, int i) : index(i), state(st) {}
+
+    template<typename T>
+    operator T();
+
+    operator std::string();
+
+    template<typename T>
+    Variant& operator=(const T& var);
+};
+
+template<typename T>
+Variant::operator T() {
+    bool success;
+    T out = VarDispatcher<T>::get(state, index, success);
+    if (!success) {
+        throw VarGetError();
+    }
+    return out;
+}
+
+template<typename T>
+Variant& Variant::operator=(const T& var) {
+    if (VarDispatcher<T>::push(state, var)) {
+        throw VarPushError();
+    }
+    lua_copy(state, -1, index);
+    lua_pop(state, 1);
+    return *this;
+}
+
+class State {
+protected:
+    lua_State *ptr_;
+public:
+    State(lua_State *p);
+    lua_State* ptr();
+
+    void pop(int n=1);
+
+    template<typename T>
+    void push(T value);
+
+    template<typename K>
+    Variant operator[](const K& key);
+};
+
+inline void State::pop(int n) {
+    lua_pop(ptr(), n);
+}
+
+
+template<typename K>
+Variant State::operator[](const K& key) {
+    bool success;
+    int i = KeyProxy<K>::get(ptr(), key, success);
+    if (!success) {
+        throw KeyGetError();
+    }
+
+    if (i == 0) {
+        i = -1;
+    }
+
+    if (i < 0) {
+        i = lua_absindex(ptr(), i);
+    }
+    return Variant(ptr(), i);
+}
+
+template<typename T>
+void State::push(T value) {
+    VarDispatcher<T>::push(ptr(), value);
+}
+
+class NewState : public State {
+public:
+    NewState();
+    ~NewState();
+};
+
+inline State::State(lua_State *p)
+    : ptr_(p) {
+}
+
+inline lua_State* State::ptr() {
+    return ptr_;
+}
+
+inline NewState::NewState()
+    : State(luaL_newstate()) {
+}
+
+inline NewState::~NewState() {
+    lua_close(ptr());
+}
+
+
+
+
+
 
 } // end namespace
 
