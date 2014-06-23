@@ -31,3 +31,5 @@ target_link_libraries(luamm_test luamm)
 #if(NOT MSVC)
     #add_subdirectory(demos)
     #endif()
+
+add_test (NAME luamm_test COMMAND luamm_test -o=report)

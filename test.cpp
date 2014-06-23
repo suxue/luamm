@@ -27,6 +27,7 @@
  */
 
 #include "luamm.hpp"
+#include <boost/test/unit_test.hpp>
 #define BOOST_TEST_MODULE LuammTest
 
 
@@ -34,3 +35,5 @@ BOOST_AUTO_TEST_CASE( helloworld )
 {
     BOOST_CHECK_EQUAL(1, 1);
 }
+
+int main(){}
