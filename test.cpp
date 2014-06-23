@@ -28,12 +28,68 @@
 
 #include "luamm.hpp"
 #include <boost/test/unit_test.hpp>
+#include <boost/mpl/assert.hpp>
+#include <boost/mpl/not.hpp>
+#include <boost/mpl/logical.hpp>
 #define BOOST_TEST_MODULE LuammTest
 
+using namespace luamm;
+using namespace std;
+using namespace boost::mpl;
 
-BOOST_AUTO_TEST_CASE( helloworld )
+BOOST_AUTO_TEST_CASE( PrePush_test )
 {
-    BOOST_CHECK_EQUAL(1, 1);
+    BOOST_MPL_ASSERT(( PredPush<VarProxy<std::string>, const char*> ));
+    BOOST_MPL_ASSERT(( PredPush<VarProxy<std::string>, const char*&> ));
+    BOOST_MPL_ASSERT(( PredPush<VarProxy<std::string>, const char*&&> ));
+    BOOST_MPL_ASSERT(( PredPush<VarProxy<std::string>, char const * const &> ));
+    BOOST_MPL_ASSERT(( PredPush<VarProxy<std::string>, char[2]> ));
+    BOOST_MPL_ASSERT(( PredPush<VarProxy<std::string>, const char[2]> ));
+    BOOST_MPL_ASSERT(( PredPush<VarProxy<std::string>, std::string&> ));
+    BOOST_MPL_ASSERT(( PredPush<VarProxy<std::string>, std::string&&> ));
+    BOOST_MPL_ASSERT(( PredPush<VarProxy<std::string>, const std::string&> ));
+
+    BOOST_MPL_ASSERT(( PredPush<VarProxy<Number>, int> ));
+    BOOST_MPL_ASSERT(( PredPush<VarProxy<Number>, unsigned int> ));
+    BOOST_MPL_ASSERT(( PredPush<VarProxy<Number>, long> ));
+    BOOST_MPL_ASSERT(( PredPush<VarProxy<Number>, double> ));
+}
+
+BOOST_AUTO_TEST_CASE( PredGet_test )
+{
+    BOOST_MPL_ASSERT(( PredGet<VarProxy<Number>, Number> ));
+    BOOST_MPL_ASSERT(( PredGet<VarProxy<Number>, double> ));
+    BOOST_MPL_ASSERT(( PredGet<VarProxy<Number>, int> ));
+    BOOST_MPL_ASSERT(( PredGet<VarProxy<Number>, bool> ));
+    BOOST_MPL_ASSERT(( not_<PredGet<VarProxy<Number>, void*>>::type ));
+
+
+    BOOST_MPL_ASSERT(( PredGet<VarProxy<const char*>, string> ));
+    BOOST_MPL_ASSERT(( PredGet<VarProxy<const char*>, const char*> ));
+    BOOST_MPL_ASSERT(( not_<PredGet<VarProxy<const char*>, char*>>::type ));
+}
+
+BOOST_AUTO_TEST_CASE( Choose )
+{
+    BOOST_MPL_ASSERT((std::is_same<
+                        SelectImpl<PredPush, const char*>::impl,
+                        string
+                      >));
+
+    BOOST_MPL_ASSERT((std::is_same<
+                        SelectImpl<PredGet, string>::impl,
+                        const char*
+                      >));
+
+    BOOST_MPL_ASSERT((std::is_same<
+                        SelectImpl<PredGet, int>::impl,
+                        Number
+                      >));
+
+    BOOST_MPL_ASSERT((std::is_same<
+                        SelectImpl<PredGet, unsigned int>::impl,
+                        Number
+                      >));
 }
 
 int main(){}

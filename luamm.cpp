@@ -1,3 +1,3 @@
 #include "luamm.hpp"
 
-int dummy(){}
+int dummy(){ return 1;}
