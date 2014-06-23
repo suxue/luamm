@@ -103,5 +103,8 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
 
     lua.push("hello");
     BOOST_CHECK_EQUAL((const char*)lua[-1], "hello");
+
+    lua.push(true);
+    BOOST_REQUIRE( bool(lua[-1]) );
 }
 

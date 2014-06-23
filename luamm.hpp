@@ -50,14 +50,6 @@ struct VarProxy<const char*> {
     }
 };
 
-template<>
-struct VarProxy<Nil> {
-    static bool push(lua_State* st, Nil _) {
-        lua_pushnil(st);
-        return true;
-    }
-};
-
 
 template<>
 struct VarProxy<Number> {
@@ -74,18 +66,6 @@ struct VarProxy<Number> {
     }
 };
 
-template<>
-struct VarProxy<bool> {
-    static bool push(lua_State* st, bool b) {
-        lua_pushboolean(st, b);
-        return true;
-    }
-
-    static bool get(lua_State* st, int index, bool& success) {
-        success = true;
-        return lua_toboolean(st, index);
-    }
-};
 
 typedef boost::mpl::list<
             std::string,
@@ -153,6 +133,30 @@ struct SelectImpl {
     static_assert( ! std::is_same<PlaceHolder, impl>::value,
             "no implmentation can be selected for T" );
     typedef VarProxy<impl> type;
+};
+template<typename T>
+struct VarDispatcher;
+
+template<>
+struct VarDispatcher<Nil> {
+    static bool push(lua_State* st, Nil _) {
+        lua_pushnil(st);
+        return true;
+    }
+};
+
+
+template<>
+struct VarDispatcher<bool> {
+    static bool push(lua_State* st, bool b) {
+        lua_pushboolean(st, b);
+        return true;
+    }
+
+    static bool get(lua_State* st, int index, bool& success) {
+        success = true;
+        return lua_toboolean(st, index);
+    }
 };
 
 // catch all
@@ -231,7 +235,7 @@ public:
 
 template<typename T>
 Variant::operator T() {
-    bool success;
+    bool success = false;
     T out = VarDispatcher<T>::get(state, index, success);
     if (!success) {
         throw VarGetError();
@@ -272,7 +276,7 @@ inline void State::pop(int n) {
 
 template<typename K>
 Variant State::operator[](const K& key) {
-    bool success;
+    bool success = false;
     int i = KeyProxy<K>::get(ptr(), key, success);
     if (!success) {
         throw KeyGetError();
