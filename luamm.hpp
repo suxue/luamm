@@ -159,18 +159,6 @@ struct VarDispatcher<bool> {
 };
 
 
-// catch all
-template<typename T>
-struct VarDispatcher {
-    static bool push(lua_State* st, const T& v) {
-        return SelectImpl<PredPush, T>::type::push(st, v);
-    }
-
-    static T get(lua_State* st, int index, bool& success) {
-        return SelectImpl<PredGet, T>::type::get(st, index, success);
-    }
-};
-
 struct RuntimeError : std::runtime_error {
     RuntimeError(const std::string& s) : std::runtime_error(s) {}
 };
@@ -217,27 +205,88 @@ struct SetterGetter<lua_State*, int> {
 };
 
 
+template<typename Container, typename Key>
 class Variant  {
-    int index;
-    lua_State* state;
+    Key index;
+    Container state;
 public:
-    Variant(lua_State* st, int i) : index(i), state(st) {}
+    Variant(Container st, const Key& i) : index(i), state(st) {}
 
     template<typename T>
     operator T() {
-        return SetterGetter<lua_State*, int>::get<T>(state, index);
-    }
-
-    operator std::string() {
-        return std::string((const char*)(*this));
+        return SetterGetter<Container, Key>::template get<T>(state, index);
     }
 
     template<typename T>
     Variant& operator=(const T& var) {
-        SetterGetter<lua_State*, int>::set<T>(state, index, var);
+        SetterGetter<Container, Key>::template set<T>(state, index, var);
         return *this;
     }
 };
+
+struct Table {
+    lua_State* state;
+    int index;
+    Table(lua_State* st, int i) : state(st), index(i) {}
+
+    template<typename T>
+    Variant<Table*, T> operator[](const T& k) {
+        return  Variant<Table*, T>(this, k);
+    }
+};
+
+template<>
+struct VarDispatcher<Table> {
+    static bool push(lua_State* st, const Table& tb) {
+        lua_pushnil(st);
+        lua_copy(st, tb.index, -1);
+        return true;
+    }
+
+    static Table get(lua_State* st, int index, bool& success) {
+        if (!lua_istable(st, index)) {
+            throw RuntimeError("is not a table");
+        }
+        return Table(st, index);
+    }
+};
+
+template<typename Key>
+struct SetterGetter<Table*, Key> {
+    template<typename Var>
+    static Var get(Table* container, const Key& key) {
+        {
+            // push key
+            Guard<VarPushError> gd;
+            gd.status = VarDispatcher<Key>::push(container->state, key);
+        }
+
+        // access table
+        lua_gettable(container->state, container->index);
+
+        // return reteieved value
+        Guard<VarGetError> gd;
+        AutoPopper ap(container->state);
+        return VarDispatcher<Var>::get(container->state, -1, gd.status);
+    }
+
+    template<typename Var>
+    static void set(Table *container, const Key& key, const Var& nv) {
+        {
+            // push key
+            Guard<VarPushError> gd;
+            gd.status = VarDispatcher<Key>::push(container->state, key);
+        }
+        {
+            // push key
+            Guard<VarPushError> gd;
+            gd.status = VarDispatcher<Var>::push(container->state, nv);
+        }
+        // access table
+        lua_settable(container->state, container->index);
+    }
+};
+
 
 class State {
 protected:
@@ -255,8 +304,13 @@ public:
         VarDispatcher<T>::push(ptr(), value);
     }
 
-    Variant operator[](int pos) {
-        return Variant(ptr(), pos);
+    Table newTable(int narray = 0, int nother = 0) {
+        lua_createtable(ptr(), 0, 0);
+        return Table(ptr(), top());
+    }
+
+    Variant<lua_State*, int> operator[](int pos) {
+        return Variant<lua_State*, int>(ptr(), pos);
     }
 
     int top() {
@@ -287,7 +341,17 @@ inline NewState::~NewState() {
 }
 
 
+// catch all
+template<typename T>
+struct VarDispatcher {
+    static bool push(lua_State* st, const T& v) {
+        return SelectImpl<PredPush, T>::type::push(st, v);
+    }
 
+    static T get(lua_State* st, int index, bool& success) {
+        return SelectImpl<PredGet, T>::type::get(st, index, success);
+    }
+};
 
 
 

@@ -109,5 +109,9 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     lua.push(true);
     BOOST_REQUIRE( bool(lua[-1]) );
     BOOST_CHECK_EQUAL(lua.top(), 3);
+
+    Table tbl = lua.newTable();
+    tbl[1] = string("hello");
+    BOOST_CHECK_EQUAL((const char*)tbl[1], "hello");
 }
 
