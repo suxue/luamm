@@ -100,11 +100,14 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     int num = rand();
     lua.push(num);
     BOOST_CHECK_EQUAL(Number(lua[-1]), num);
+    BOOST_CHECK_EQUAL(lua.top(), 1);
 
     lua.push("hello");
     BOOST_CHECK_EQUAL((const char*)lua[-1], "hello");
+    BOOST_CHECK_EQUAL(lua.top(), 2);
 
     lua.push(true);
     BOOST_REQUIRE( bool(lua[-1]) );
+    BOOST_CHECK_EQUAL(lua.top(), 3);
 }
 

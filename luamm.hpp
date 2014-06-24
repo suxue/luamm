@@ -145,7 +145,6 @@ struct VarDispatcher<Nil> {
     }
 };
 
-
 template<>
 struct VarDispatcher<bool> {
     static bool push(lua_State* st, bool b) {
@@ -159,6 +158,7 @@ struct VarDispatcher<bool> {
     }
 };
 
+
 // catch all
 template<typename T>
 struct VarDispatcher {
@@ -171,87 +171,73 @@ struct VarDispatcher {
     }
 };
 
-/*
- * KeyProxy is a template that translate an Key(a position point to
- * somewhere inside lua state) to a stack position, either valid or pseudo.
- *
- * int get(Key k, bool& success)
- *      - if k is an int (actual position), just return it as is
- *      - otherwise, push that value to the stack and return 0, which
- *      -- implies that caller should clean the stack top after return
- *      - success denotes if the action is completed successfully
- *
- * bool put(Key k)
- *      - push the variable pointed by k to the stack
- *      - check return value to see if completed successfully
- */
-template<typename K>
-struct KeyProxy;
-
-template<>
-struct KeyProxy<int> {
-    static int get(lua_State *st, int i, bool& success) {
-        success = true;
-        return i;
-    }
-
-    static bool put(lua_State *st, int i) {
-        lua_pushnil(st);
-        lua_copy(st, i, -1);
-        return true;
-    }
-};
-
 struct RuntimeError : std::runtime_error {
     RuntimeError(const std::string& s) : std::runtime_error(s) {}
 };
+struct KeyGetError : RuntimeError { KeyGetError() : RuntimeError("") {} };
+struct KeyPutError : RuntimeError { KeyPutError() : RuntimeError("") {} };
+struct VarGetError : RuntimeError { VarGetError() : RuntimeError("") {} };
+struct VarPushError : RuntimeError { VarPushError() : RuntimeError("") {} };
 
-struct KeyGetError : RuntimeError {
-    KeyGetError() : RuntimeError("") {}
+template<typename Container, typename Key>
+struct SetterGetter;
+
+template<typename Exception>
+struct Guard {
+    bool status;
+    Guard() : status(false) {}
+    ~Guard() { if (!status) throw Exception(); }
 };
 
-struct VarGetError : RuntimeError {
-    VarGetError() : RuntimeError("") {}
+class AutoPopper {
+    lua_State* state;
+    int n;
+public:
+    AutoPopper(lua_State* st, int n = 1) : state(st), n(n) {}
+    ~AutoPopper() { if (n > 0) lua_pop(state, n);  }
 };
 
-struct VarPushError : RuntimeError {
-    VarPushError() : RuntimeError("") {}
+template<>
+struct SetterGetter<lua_State*, int> {
+    template<typename Var>
+    static Var get(lua_State* container, int key) {
+        Guard<VarGetError> gd;
+        return VarDispatcher<Var>::get(container, key, gd.status);
+    }
+
+    template<typename Var>
+    static void set(lua_State* container, int key, const Var& nv) {
+        {
+            Guard<VarPushError> gd;
+            gd.status = VarDispatcher<Var>::push(container, nv);
+        }
+        AutoPopper ap(container);
+        lua_copy(container, -1, key);
+    };
 };
 
-class Variant {
-    int  index;
+
+class Variant  {
+    int index;
     lua_State* state;
 public:
     Variant(lua_State* st, int i) : index(i), state(st) {}
 
     template<typename T>
-    operator T();
+    operator T() {
+        return SetterGetter<lua_State*, int>::get<T>(state, index);
+    }
 
-    operator std::string();
+    operator std::string() {
+        return std::string((const char*)(*this));
+    }
 
     template<typename T>
-    Variant& operator=(const T& var);
+    Variant& operator=(const T& var) {
+        SetterGetter<lua_State*, int>::set<T>(state, index, var);
+        return *this;
+    }
 };
-
-template<typename T>
-Variant::operator T() {
-    bool success = false;
-    T out = VarDispatcher<T>::get(state, index, success);
-    if (!success) {
-        throw VarGetError();
-    }
-    return out;
-}
-
-template<typename T>
-Variant& Variant::operator=(const T& var) {
-    if (VarDispatcher<T>::push(state, var)) {
-        throw VarPushError();
-    }
-    lua_copy(state, -1, index);
-    lua_pop(state, 1);
-    return *this;
-}
 
 class State {
 protected:
@@ -260,42 +246,23 @@ public:
     State(lua_State *p);
     lua_State* ptr();
 
-    void pop(int n=1);
+    void pop(int n=1) {
+        lua_pop(ptr(), n);
+    }
 
     template<typename T>
-    void push(T value);
+    void push(T value) {
+        VarDispatcher<T>::push(ptr(), value);
+    }
 
-    template<typename K>
-    Variant operator[](const K& key);
+    Variant operator[](int pos) {
+        return Variant(ptr(), pos);
+    }
+
+    int top() {
+        return lua_gettop(ptr());
+    }
 };
-
-inline void State::pop(int n) {
-    lua_pop(ptr(), n);
-}
-
-
-template<typename K>
-Variant State::operator[](const K& key) {
-    bool success = false;
-    int i = KeyProxy<K>::get(ptr(), key, success);
-    if (!success) {
-        throw KeyGetError();
-    }
-
-    if (i == 0) {
-        i = -1;
-    }
-
-    if (i < 0) {
-        i = lua_absindex(ptr(), i);
-    }
-    return Variant(ptr(), i);
-}
-
-template<typename T>
-void State::push(T value) {
-    VarDispatcher<T>::push(ptr(), value);
-}
 
 class NewState : public State {
 public:
