@@ -33,6 +33,7 @@
 #include <boost/mpl/not.hpp>
 #include <boost/mpl/logical.hpp>
 #include <cstdlib>
+#include <functional>
 
 using namespace luamm;
 using namespace std;
@@ -93,6 +94,10 @@ BOOST_AUTO_TEST_CASE( Choose )
                       >));
 }
 
+extern "C" int cfunction(lua_State* st) {
+    return 1;
+}
+
 BOOST_AUTO_TEST_CASE( Basic_Load )
 {
     NewState lua;
@@ -113,5 +118,9 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     Table tbl = lua.newTable();
     tbl[1] = "hello";
     BOOST_CHECK_EQUAL((const char*)tbl[1], "hello");
+
+    tbl[2] = cfunction;
+    CFunction cfunc = tbl[2];
+    BOOST_CHECK_EQUAL(cfunc, cfunction);
 }
 

@@ -18,8 +18,35 @@ typedef lua_Number Number;
 
 class Nil {};
 
+typedef lua_CFunction CFunction;
+
+struct CClosure {
+    CFunction func;
+    int upvalues;
+public:
+    CClosure(CFunction func, int upvalues = 0)
+        : func(func), upvalues(upvalues) {}
+    operator CFunction() {
+        return func;
+    }
+};
+
 template<typename LuaValue>
 struct VarProxy;
+
+template<>
+struct VarProxy<CClosure> {
+    static bool push(lua_State* st, CClosure c) {
+        lua_pushcclosure(st, c.func, c.upvalues);
+        return true;
+    }
+
+    static CClosure get(lua_State* st, int index, bool& success) {
+        auto p = lua_tocfunction(st, index);
+        if (p) success = true;
+        return p;
+    }
+};
 
 template<>
 struct VarProxy<std::string> {
@@ -56,7 +83,8 @@ struct VarProxy<Number> {
 typedef boost::mpl::list<
             std::string,
             const char*,
-            Number
+            Number,
+            CClosure
         > varproxies;
 struct PlaceHolder {};
 
@@ -364,8 +392,6 @@ inline NewState::NewState()
 inline NewState::~NewState() {
     lua_close(ptr());
 }
-
-
 
 
 } // end namespace
