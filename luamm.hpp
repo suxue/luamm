@@ -18,21 +18,8 @@ typedef lua_Number Number;
 
 class Nil {};
 
-// All template implementations should only depends on lua c api
-
-/*
- *  VarProxy is a template struct which provide functions for store/load
- *  lua variable from/to the stack top.
- *
- *  bool push(T variable)
- *      - push variable of type T to stack
- *  T get(int index, bool& success)
- *      - return variable in stack position `index`
- *      - set success to false when unsuccess
- */
 template<typename LuaValue>
 struct VarProxy;
-
 
 template<>
 struct VarProxy<std::string> {
@@ -49,7 +36,6 @@ struct VarProxy<const char*> {
         return r;
     }
 };
-
 
 template<>
 struct VarProxy<Number> {
@@ -134,11 +120,9 @@ struct SelectImpl {
             "no implmentation can be selected for T" );
     typedef VarProxy<impl> type;
 };
-template<typename T>
-struct VarDispatcher;
 
 template<>
-struct VarDispatcher<Nil> {
+struct VarProxy<Nil> {
     static bool push(lua_State* st, Nil _) {
         lua_pushnil(st);
         return true;
@@ -146,7 +130,7 @@ struct VarDispatcher<Nil> {
 };
 
 template<>
-struct VarDispatcher<bool> {
+struct VarProxy<bool> {
     static bool push(lua_State* st, bool b) {
         lua_pushboolean(st, b);
         return true;
@@ -185,19 +169,60 @@ public:
     ~AutoPopper() { if (n > 0) lua_pop(state, n);  }
 };
 
+template<typename T>
+struct VarDispatcher {
+
+   template<typename C>
+   static char testget( decltype(&VarProxy<C>::get) );
+
+   template<typename C>
+   static double testget( ... );
+
+   template<typename C>
+   static char testpush( decltype(&VarProxy<C>::push) );
+
+   template<typename C>
+   static double testpush( ... );
+
+   enum { use_indirect_get = sizeof(testget<T>(nullptr)) != 1 };
+   enum { use_indirect_push = sizeof(testpush<T>(nullptr)) != 1 };
+};
+
+template<typename T>
+struct VarPusher {
+    typedef typename std::conditional<VarDispatcher<T>::use_indirect_push,
+                 typename SelectImpl<PredPush, T>::type,
+                 VarProxy<T>
+            >::type type;
+    static bool push(lua_State* st, const T& v) {
+        return type::push(st, v);
+    }
+};
+
+template<typename T>
+struct VarGetter {
+    typedef typename std::conditional<VarDispatcher<T>::use_indirect_get,
+                 typename SelectImpl<PredGet, T>::type,
+                 VarProxy<T>
+            >::type type;
+    static T get(lua_State* st, int index, bool& success) {
+        return type::get(st, index, success);
+    }
+};
+
 template<>
 struct SetterGetter<lua_State*, int> {
     template<typename Var>
     static Var get(lua_State* container, int key) {
         Guard<VarGetError> gd;
-        return VarDispatcher<Var>::get(container, key, gd.status);
+        return VarGetter<Var>::get(container, key, gd.status);
     }
 
     template<typename Var>
     static void set(lua_State* container, int key, const Var& nv) {
         {
             Guard<VarPushError> gd;
-            gd.status = VarDispatcher<Var>::push(container, nv);
+            gd.status = VarPusher<Var>::push(container, nv);
         }
         AutoPopper ap(container);
         lua_copy(container, -1, key);
@@ -236,7 +261,7 @@ struct Table {
 };
 
 template<>
-struct VarDispatcher<Table> {
+struct VarProxy<Table> {
     static bool push(lua_State* st, const Table& tb) {
         lua_pushnil(st);
         lua_copy(st, tb.index, -1);
@@ -258,7 +283,7 @@ struct SetterGetter<Table*, Key> {
         {
             // push key
             Guard<VarPushError> gd;
-            gd.status = VarDispatcher<Key>::push(container->state, key);
+            gd.status = VarPusher<Key>::push(container->state, key);
         }
 
         // access table
@@ -267,7 +292,7 @@ struct SetterGetter<Table*, Key> {
         // return reteieved value
         Guard<VarGetError> gd;
         AutoPopper ap(container->state);
-        return VarDispatcher<Var>::get(container->state, -1, gd.status);
+        return VarGetter<Var>::get(container->state, -1, gd.status);
     }
 
     template<typename Var>
@@ -275,12 +300,12 @@ struct SetterGetter<Table*, Key> {
         {
             // push key
             Guard<VarPushError> gd;
-            gd.status = VarDispatcher<Key>::push(container->state, key);
+            gd.status = VarPusher<Key>::push(container->state, key);
         }
         {
             // push key
             Guard<VarPushError> gd;
-            gd.status = VarDispatcher<Var>::push(container->state, nv);
+            gd.status = VarPusher<Var>::push(container->state, nv);
         }
         // access table
         lua_settable(container->state, container->index);
@@ -301,7 +326,7 @@ public:
 
     template<typename T>
     void push(T value) {
-        VarDispatcher<T>::push(ptr(), value);
+        VarPusher<T>::push(ptr(), value);
     }
 
     Table newTable(int narray = 0, int nother = 0) {
@@ -340,18 +365,6 @@ inline NewState::~NewState() {
     lua_close(ptr());
 }
 
-
-// catch all
-template<typename T>
-struct VarDispatcher {
-    static bool push(lua_State* st, const T& v) {
-        return SelectImpl<PredPush, T>::type::push(st, v);
-    }
-
-    static T get(lua_State* st, int index, bool& success) {
-        return SelectImpl<PredGet, T>::type::get(st, index, success);
-    }
-};
 
 
 
