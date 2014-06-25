@@ -149,6 +149,7 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         math_tab["xxx"] = CClosure(cfunction, 1);
         BOOST_CHECK_EQUAL(lua.top(), 5);
 
+        BOOST_REQUIRE(math_tab["xxx"].iscfun());
         Closure func = math_tab["xxx"];
         BOOST_CHECK_EQUAL(lua.top(), 6);
 
@@ -158,6 +159,20 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         const char *nice = func[1];
         BOOST_CHECK_EQUAL(lua.top(), 6);
         BOOST_CHECK_EQUAL(nice, "nice");
+    }
+
+    BOOST_CHECK_EQUAL(lua.top(), 3);
+
+    {
+        Table t = lua.newTable();
+        BOOST_CHECK_EQUAL(t.index, 4);
+
+        Table mt = lua.newTable();
+        BOOST_CHECK_EQUAL(mt.index, 5);
+
+        t.set(mt);
+        Table _mt = t.get();
+        BOOST_REQUIRE(mt == _mt);
     }
 
     BOOST_CHECK_EQUAL(lua.top(), 3);

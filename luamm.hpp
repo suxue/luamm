@@ -26,7 +26,87 @@ struct StackVariable {
     enum { value = 0 };
 };
 
-struct Closure;
+struct RuntimeError : std::runtime_error {
+    RuntimeError(const std::string& s) : std::runtime_error(s) {}
+};
+
+template<typename Container, typename Key>
+struct Accessor;
+
+template<typename Container, typename Key, typename KeyStore = Key>
+class Variant  {
+    KeyStore index;
+    Container state;
+public:
+    Variant(Container st, const Key& i) : index(i), state(st) {}
+
+    template<typename T>
+    operator T() {
+        return Accessor<Container, KeyStore>::template get<T>(state, index);
+    }
+
+    template<typename T>
+    Variant& operator=(const T& var) {
+        Accessor<Container, KeyStore>::template set<T>(state, index, var);
+        return *this;
+    }
+
+    int type() {
+        return Accessor<Container, KeyStore>::type(state, index);
+    }
+
+    bool isnum() { return type() == LUA_TNUMBER; }
+    bool istab() { return type() == LUA_TTABLE; }
+    bool isnil() { return type() == LUA_TNIL; }
+    bool isbool() { return type() == LUA_TBOOLEAN; }
+    bool isstr() { return type() == LUA_TSTRING; }
+    bool isfun() { return type() == LUA_TFUNCTION; }
+    bool isuserdata() { return type() == LUA_TUSERDATA; }
+    bool isthread() { return type() == LUA_TTHREAD; }
+    bool islight() { return type() == LUA_TLIGHTUSERDATA; }
+
+    bool iscfun() {
+        try {
+            Accessor<Container, KeyStore>::template get<CFunction>(state, index);
+        } catch (RuntimeError e) {
+            return false;
+        }
+        return true;
+    }
+};
+
+template<typename T>
+struct VarPusher;
+
+struct Table {
+    lua_State* state;
+    int index;
+    Table(lua_State* st, int i);
+    ~Table();
+
+    template<typename T>
+    Variant<Table*, T, typename VarPusher<T>::type> operator[](const T& k);
+
+    void set(const Table& metatab);
+    Table get();
+
+    bool operator==(const Table& o) const {
+        return o.state == state &&
+                lua_compare(state, index, o.index, LUA_OPEQ);
+    }
+    Table(Table&& o) : state(o.state), index(o.index) {
+        o.state = nullptr;
+        o.index = 0;
+    }
+private:
+    Table(const Table&);
+};
+
+template<typename Sub>
+struct HasMetaTable {
+    void set(const Table& metatab);
+    Table get();
+};
 
 struct CClosure {
     int index;
@@ -108,7 +188,6 @@ struct VarProxy<Number> : VarBase  {
 };
 
 
-struct Table;
 typedef boost::mpl::list<
             std::string,
             const char*,
@@ -197,50 +276,32 @@ struct VarProxy<bool> : VarBase {
     }
 };
 
-template<typename Container, typename Key>
-struct Accessor;
 
-template<typename Container, typename Key, typename KeyStore = Key>
-class Variant  {
-    KeyStore index;
-    Container state;
-public:
-    Variant(Container st, const Key& i) : index(i), state(st) {}
 
-    template<typename T>
-    operator T() {
-        return Accessor<Container, KeyStore>::template get<T>(state, index);
-    }
-
-    template<typename T>
-    Variant& operator=(const T& var) {
-        Accessor<Container, KeyStore>::template set<T>(state, index, var);
-        return *this;
-    }
-
-    int type() {
-        return Accessor<Container, KeyStore>::type(state, index);
-    }
-};
-
-struct RuntimeError : std::runtime_error {
-    RuntimeError(const std::string& s) : std::runtime_error(s) {}
-};
-
-struct Closure {
+struct Closure : public HasMetaTable<Closure> {
     lua_State* state;
     int index;
-    Closure(lua_State* st, int index) : state(st), index(index) {}
+    Closure(lua_State* st, int index) : state(st), index(lua_absindex(st, index)) {}
     Variant<Closure*, int>  operator[](int n) {
         return Variant<Closure*, int>(this, n);
     }
     ~Closure() {
-        if (lua_gettop(state) == index) {
-            lua_pop(state, 1);
-        } else {
-            throw RuntimeError("cannot clean up stack variable (table)");
+        if (state) {
+            if (lua_gettop(state) == index) {
+                lua_pop(state, 1);
+            } else {
+                throw RuntimeError(
+                    std::string("cannot clean up stack variable (closure)")
+                        + std::to_string(index));
+            }
         }
     }
+    Closure(Closure&& o) : state(o.state), index(o.index) {
+        o.state = nullptr;
+        o.index = 0;
+    }
+private:
+    Closure(const Closure&);
 };
 
 template<>
@@ -259,34 +320,15 @@ struct VarProxy<Closure> : VarBase {
     Closure get(int index, bool& success) {
         if (lua_isfunction(state, index)) {
             success = true;
-            return Closure(state, lua_absindex(state, index));
+            return Closure(state, index);
         } else {
             return Closure(nullptr, 0);
         }
     }
 };
 
-template<typename T>
-struct VarPusher;
 
 
-struct Table {
-    lua_State* state;
-    int index;
-    Table(lua_State* st, int i) : state(st), index(i) {}
-    ~Table() {
-        if (lua_gettop(state) == index) {
-            lua_pop(state, 1);
-        } else {
-            throw RuntimeError("cannot clean up stack variable (table)");
-        }
-    }
-
-    template<typename T>
-    Variant<Table*, T, typename VarPusher<T>::type> operator[](const T& k) {
-        return  Variant<Table*, T, typename VarPusher<T>::type>(this, k);
-    }
-};
 
 template<>
 struct StackVariable<Table> {
@@ -328,7 +370,7 @@ struct VarProxy<Table> : VarBase {
             throw RuntimeError("is not a table");
         }
         success = true;
-        return Table(state, lua_absindex(state, index));
+        return Table(state, index);
     }
 };
 
@@ -573,6 +615,63 @@ inline NewState::~NewState() {
     lua_close(ptr());
 }
 
+inline Table::Table(lua_State* st, int i)
+    : state(st), index(lua_absindex(st,i)) {}
+
+inline Table::~Table() {
+    if (state) {
+        if (lua_gettop(state) == index) {
+            lua_pop(state, 1);
+        } else {
+            throw RuntimeError(
+                std::string("cannot clean up stack variable (table)")
+                    + std::to_string(index));
+        }
+    }
+}
+
+template<typename T>
+Variant<Table*, T, typename VarPusher<T>::type> Table::operator[](const T& k) {
+    return  Variant<Table*, T, typename VarPusher<T>::type>(this, k);
+}
+
+inline void Table::set(const Table& metatab) {
+    if (!VarPusher<Table>::push(state, metatab)) {
+        throw RuntimeError("cannot push metatable");
+    }
+    lua_setmetatable(state, index);
+}
+
+struct NoMetatableError : public RuntimeError {
+    NoMetatableError() : RuntimeError("") {}
+};
+
+inline Table Table::get() {
+    if (!lua_getmetatable(state, index)) {
+        throw NoMetatableError();
+    }
+    return Table(state, -1);
+}
+
+template<typename Sub>
+void HasMetaTable<Sub>::set(const Table& metatab) {
+    Sub* p = static_cast<Sub*>(*this);
+    {
+        Guard<VarPushError> gd;
+        gd.status = VarPusher<Table>::push(p->state, metatab);
+    }
+    lua_setmetatable(p->state, p->index);
+}
+
+
+template<typename Sub>
+Table HasMetaTable<Sub>::get() {
+    Sub* p = static_cast<Sub*>(*this);
+    if (!lua_getmetatable(p->state, p->index)) {
+        throw NoMetatableError();
+    }
+    return Table(p->state, -1);
+}
 
 } // end namespace
 
