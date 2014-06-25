@@ -21,6 +21,11 @@ class Nil {};
 
 typedef lua_CFunction CFunction;
 
+template<typename T>
+struct StackVariable {
+    enum { value = 0 };
+};
+
 struct Closure;
 
 struct CClosure {
@@ -218,6 +223,10 @@ public:
     }
 };
 
+struct RuntimeError : std::runtime_error {
+    RuntimeError(const std::string& s) : std::runtime_error(s) {}
+};
+
 struct Closure {
     lua_State* state;
     int index;
@@ -225,6 +234,18 @@ struct Closure {
     Variant<Closure*, int>  operator[](int n) {
         return Variant<Closure*, int>(this, n);
     }
+    ~Closure() {
+        if (lua_gettop(state) == index) {
+            lua_pop(state, 1);
+        } else {
+            throw RuntimeError("cannot clean up stack variable (table)");
+        }
+    }
+};
+
+template<>
+struct StackVariable<Closure> {
+    enum { value = 1 };
 };
 
 template<>
@@ -248,10 +269,18 @@ struct VarProxy<Closure> : VarBase {
 template<typename T>
 struct VarPusher;
 
+
 struct Table {
     lua_State* state;
     int index;
     Table(lua_State* st, int i) : state(st), index(i) {}
+    ~Table() {
+        if (lua_gettop(state) == index) {
+            lua_pop(state, 1);
+        } else {
+            throw RuntimeError("cannot clean up stack variable (table)");
+        }
+    }
 
     template<typename T>
     Variant<Table*, T, typename VarPusher<T>::type> operator[](const T& k) {
@@ -259,9 +288,11 @@ struct Table {
     }
 };
 
-struct RuntimeError : std::runtime_error {
-    RuntimeError(const std::string& s) : std::runtime_error(s) {}
+template<>
+struct StackVariable<Table> {
+    enum { value = 1 };
 };
+
 struct KeyGetError : RuntimeError { KeyGetError() : RuntimeError("") {} };
 struct KeyPutError : RuntimeError { KeyPutError() : RuntimeError("") {} };
 struct VarGetError : RuntimeError { VarGetError() : RuntimeError("") {} };
@@ -349,9 +380,6 @@ struct VarGetter {
 template<typename Container, typename Key>
 struct Accessor;
 
-// stack variables are not value but a reference to position in the stack
-template<typename T>
-struct StackVariable { enum { value = 0 }; };
 
 template<>
 struct Accessor<Closure*, int> {
@@ -408,13 +436,6 @@ struct Accessor<lua_State*, int> {
         return lua_type(st, i);
     }
 };
-
-
-template<>
-struct StackVariable<Table> { enum { value = 1 }; };
-
-template<>
-struct StackVariable<Closure> { enum { value = 1 }; };
 
 // global variable key
 template<>
