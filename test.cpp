@@ -143,5 +143,16 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     Number pino = pi;
     BOOST_REQUIRE(pino > 3.14 && pino < 3.15);
     BOOST_CHECK_EQUAL(lua.top(), 5);
+
+    // has 1 upvalue
+    math_tab["xxx"] = CClosure(cfunction, 1);
+    BOOST_CHECK_EQUAL(lua.top(), 5);
+
+    Closure func = math_tab["xxx"];
+    BOOST_CHECK_EQUAL(lua.top(), 6);
+
+    func[1] = "nice";
+    const char *nice = func[1];
+    BOOST_CHECK_EQUAL(nice, "nice");
 }
 

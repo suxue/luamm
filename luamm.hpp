@@ -21,10 +21,7 @@ class Nil {};
 
 typedef lua_CFunction CFunction;
 
-struct Closure {
-    int index;
-    Closure(int index) : index(index) {}
-};
+struct Closure;
 
 struct CClosure {
     int index;
@@ -56,34 +53,23 @@ struct VarBase {
 template<>
 struct VarProxy<CClosure> : VarBase {
     bool push(CClosure c) {
+        for (auto i = 0; i < c.index; i++)
+            lua_pushnil(state);
         lua_pushcclosure(state, c.func, c.index);
         return true;
     }
 
-    CClosure get(int index, bool& success) {
-        auto p = lua_tocfunction(state, index);
-        if (p) success = true;
-        return CClosure(p, lua_absindex(state, index));
-    }
 };
 
 template<>
-struct VarProxy<Closure> : VarBase {
-    bool push(Closure c) {
-        lua_pushnil(state);
-        lua_copy(state, c.index, -1);
-        return true;
-    }
-
-    Closure get(int index, bool& success) {
-        if (lua_isfunction(state, index)) {
-            success = true;
-            return Closure(lua_absindex(state, index));
-        } else {
-            return Closure(0);
-        }
+struct VarProxy<CFunction> : VarBase {
+    CFunction get(int index, bool& success) {
+        auto p = lua_tocfunction(state, index);
+        if (p) success = true;
+        return p;
     }
 };
+
 
 template<>
 struct VarProxy<std::string> : VarBase {
@@ -232,6 +218,33 @@ public:
     }
 };
 
+struct Closure {
+    lua_State* state;
+    int index;
+    Closure(lua_State* st, int index) : state(st), index(index) {}
+    Variant<Closure*, int>  operator[](int n) {
+        return Variant<Closure*, int>(this, n);
+    }
+};
+
+template<>
+struct VarProxy<Closure> : VarBase {
+    bool push(Closure c) {
+        lua_pushnil(state);
+        lua_copy(state, c.index, -1);
+        return true;
+    }
+
+    Closure get(int index, bool& success) {
+        if (lua_isfunction(state, index)) {
+            success = true;
+            return Closure(state, lua_absindex(state, index));
+        } else {
+            return Closure(nullptr, 0);
+        }
+    }
+};
+
 template<typename T>
 struct VarPusher;
 
@@ -336,6 +349,42 @@ struct VarGetter {
 template<typename Container, typename Key>
 struct Accessor;
 
+// stack variables are not value but a reference to position in the stack
+template<typename T>
+struct StackVariable { enum { value = 0 }; };
+
+template<>
+struct Accessor<Closure*, int> {
+    template<typename Var>
+    static Var get(Closure* cl, int key) {
+        auto p = lua_getupvalue(cl->state, cl->index, key);
+        if (!p) { throw VarGetError(); }
+        Guard<VarGetError> gd;
+        AutoPopper ap(cl->state, 1 - StackVariable<Var>::value);
+        return VarGetter<Var>::get(cl->state, -1, gd.status);
+    }
+
+    static int type(Closure* cl, int key) {
+        auto p = lua_getupvalue(cl->state, cl->index, key);
+        if (!p) { throw VarGetError(); }
+        AutoPopper ap(cl->state);
+        return lua_type(cl->state, -1);
+    }
+
+    template<typename Var>
+    static void set(Closure* cl, int key, const Var& nv) {
+        {
+            Guard<VarPushError> gd;
+            gd.status = VarPusher<Var>::push(cl->state, nv);
+        }
+        if (!lua_setupvalue(cl->state, cl->index, key)) {
+            lua_pop(cl->state, 1);
+            throw RuntimeError("cannot set upvalue");
+        }
+    }
+
+};
+
 // stack + position
 template<>
 struct Accessor<lua_State*, int> {
@@ -360,9 +409,6 @@ struct Accessor<lua_State*, int> {
     }
 };
 
-// stack variables are not value but a reference to position in the stack
-template<typename T>
-struct StackVariable { enum { value = 0 }; };
 
 template<>
 struct StackVariable<Table> { enum { value = 1 }; };
@@ -505,7 +551,6 @@ inline NewState::NewState()
 inline NewState::~NewState() {
     lua_close(ptr());
 }
-
 
 
 } // end namespace
