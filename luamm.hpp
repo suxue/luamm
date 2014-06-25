@@ -28,7 +28,12 @@ struct StackVariable {
 
 struct RuntimeError : std::runtime_error {
     RuntimeError(const std::string& s) : std::runtime_error(s) {}
+    RuntimeError() : std::runtime_error("") {}
 };
+
+
+template<typename T>
+struct VarPusher;
 
 template<typename Container, typename Key>
 struct Accessor;
@@ -75,9 +80,6 @@ public:
     }
 };
 
-template<typename T>
-struct VarPusher;
-
 struct Table {
     lua_State* state;
     int index;
@@ -121,6 +123,31 @@ public:
     }
 };
 
+struct UserData : HasMetaTable<UserData> {
+    lua_State* state;
+    int index;
+    UserData(lua_State* st, int index)
+        : state(st), index(lua_absindex(st, index)) {}
+    UserData(UserData&& o) : state(o.state), index(o.index) {
+        o.state = nullptr;
+        o.index = 0;
+    }
+
+    template<typename T>
+    T* to() {
+        void *p = lua_touserdata(state, index);
+        return static_cast<T*>(p);
+    }
+    ~UserData();
+private:
+    UserData(const UserData&);
+};
+
+template<>
+struct StackVariable<UserData> {
+    enum { value = 1 };
+};
+
 template<typename LuaValue>
 struct VarProxy;
 
@@ -143,7 +170,35 @@ struct VarProxy<CClosure> : VarBase {
         lua_pushcclosure(state, c.func, c.index);
         return true;
     }
+};
 
+// light userdata
+template<>
+struct VarProxy<void*> : VarBase {
+    bool push(void* l) {
+        lua_pushlightuserdata(state, l);
+        return true;
+    }
+
+    void *get(int index, bool& success) {
+        auto p = lua_touserdata(state, index);
+        if (p) success = true;
+        return p;
+    }
+};
+
+template<>
+struct VarProxy<UserData> : VarBase {
+    bool push(const UserData& l) {
+        lua_pushnil(state);
+        lua_copy(state, l.index, -1);
+        return true;
+    }
+
+    UserData get(int index, bool& success) {
+        success = true;
+        return UserData(state, index);
+    }
 };
 
 template<>
@@ -276,6 +331,14 @@ struct VarProxy<bool> : VarBase {
     }
 };
 
+template<typename Exception>
+struct Guard {
+    bool status;
+    Guard() : status(false) {}
+    ~Guard() { if (!status) throw Exception(); }
+};
+
+struct VarPushError : RuntimeError { VarPushError() : RuntimeError("") {} };
 
 
 struct Closure : public HasMetaTable<Closure> {
@@ -300,6 +363,29 @@ struct Closure : public HasMetaTable<Closure> {
         o.state = nullptr;
         o.index = 0;
     }
+
+    template<typename... Args>
+    Variant<lua_State*, int> operator()(Args... args) {
+        return call<0, Args...>(args...);
+    }
+
+    template<int count, typename T, typename... Args>
+    Variant<lua_State*, int> call(const T& a, Args... args) {
+        {
+            Guard<VarPushError> gd;
+            gd.status = VarPusher<T>::push(state, a);
+        }
+        return this->call<count+1, Args...>(args...);
+    }
+
+    template<int count>
+    Variant<lua_State*, int> call() {
+        auto i = lua_pcall(state, count, 1, 0);
+        if (i != LUA_OK) {
+            throw RuntimeError();
+        }
+        return Variant<lua_State*, int>(state, lua_gettop(state));
+    }
 private:
     Closure(const Closure&);
 };
@@ -311,7 +397,7 @@ struct StackVariable<Closure> {
 
 template<>
 struct VarProxy<Closure> : VarBase {
-    bool push(Closure c) {
+    bool push(const Closure& c) {
         lua_pushnil(state);
         lua_copy(state, c.index, -1);
         return true;
@@ -338,15 +424,8 @@ struct StackVariable<Table> {
 struct KeyGetError : RuntimeError { KeyGetError() : RuntimeError("") {} };
 struct KeyPutError : RuntimeError { KeyPutError() : RuntimeError("") {} };
 struct VarGetError : RuntimeError { VarGetError() : RuntimeError("") {} };
-struct VarPushError : RuntimeError { VarPushError() : RuntimeError("") {} };
 
 
-template<typename Exception>
-struct Guard {
-    bool status;
-    Guard() : status(false) {}
-    ~Guard() { if (!status) throw Exception(); }
-};
 
 class AutoPopper {
     lua_State* state;
@@ -554,7 +633,6 @@ struct Accessor<Table*, Key> {
     }
 };
 
-
 class State {
 protected:
     lua_State *ptr_;
@@ -567,13 +645,22 @@ public:
     }
 
     template<typename T>
-    void push(T value) {
+    void push(const T& value) {
         VarPusher<T>::push(ptr(), value);
     }
 
     Table newTable(int narray = 0, int nother = 0) {
         lua_createtable(ptr(), 0, 0);
         return Table(ptr(), top());
+    }
+
+    template<typename T, typename... Args>
+    UserData newUserData(Args... args) {
+        static_assert(std::is_trivially_destructible<T>::value,
+                "cannot allocate complex type in userdata");
+        void * buf = lua_newuserdata(ptr(), sizeof(T));
+        new (buf) T(args...);
+        return UserData(ptr(), -1);
     }
 
     Variant<lua_State*, int> operator[](int pos) {
@@ -590,6 +677,24 @@ public:
 
     void openlibs() {
         luaL_openlibs(ptr());
+    }
+
+    template<typename T>
+    void error(const T& t) {
+        push(t);
+        lua_error(ptr());
+    }
+
+    Table registry() {
+        return this->operator[](LUA_REGISTRYINDEX);
+    }
+
+    int load(const std::string& str) {
+        return luaL_loadstring(ptr(), str.c_str());
+    }
+
+    int pcall(int nargs, int nresults, int msgh = 0) {
+        return lua_pcall(ptr(), nargs, nresults, msgh);
     }
 };
 
@@ -625,6 +730,18 @@ inline Table::~Table() {
         } else {
             throw RuntimeError(
                 std::string("cannot clean up stack variable (table)")
+                    + std::to_string(index));
+        }
+    }
+}
+
+inline UserData::~UserData() {
+    if (state) {
+        if (lua_gettop(state) == index) {
+            lua_pop(state, 1);
+        } else {
+            throw RuntimeError(
+                std::string("cannot clean up stack variable (userdata)")
                     + std::to_string(index));
         }
     }

@@ -33,6 +33,7 @@
 #include <boost/mpl/not.hpp>
 #include <boost/mpl/logical.hpp>
 #include <cstdlib>
+#include <cmath>
 #include <functional>
 
 using namespace luamm;
@@ -175,6 +176,44 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         BOOST_REQUIRE(mt == _mt);
     }
 
+    BOOST_CHECK_EQUAL(lua.top(), 3);
+
+    {
+        Table math = lua["math"];
+        UserData ud = lua.newUserData<double>(100);
+        math["userdata"] = ud;
+    }
+
+    BOOST_CHECK_EQUAL(lua.top(), 3);
+
+    {
+        Table math = lua["math"];
+        UserData ud = math["userdata"];
+        BOOST_CHECK_EQUAL(*ud.to<double>(), 100);
+    }
+
+    BOOST_CHECK_EQUAL(lua.top(), 3);
+
+    {
+        Table math = lua["math"];
+        math["userdata"] = static_cast<void*>(new double(101));
+    }
+    BOOST_CHECK_EQUAL(lua.top(), 3);
+
+    {
+        Table math = lua["math"];
+        void *p = math["userdata"];
+        auto pp = static_cast<double*>(p);
+        BOOST_CHECK_EQUAL(*pp, 101);
+        delete pp;
+    }
+    BOOST_CHECK_EQUAL(lua.top(), 3);
+
+    {
+        Table math = lua["math"];
+        Closure log = math["log"];
+        BOOST_CHECK_EQUAL(Number( log(100) ), std::log(100));
+    }
     BOOST_CHECK_EQUAL(lua.top(), 3);
 }
 
