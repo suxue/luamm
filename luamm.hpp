@@ -34,46 +34,55 @@ public:
 template<typename LuaValue>
 struct VarProxy;
 
+struct VarBase {
+    lua_State *state;
+
+    VarBase(lua_State *st) : state(st) {}
+
+    template<typename T>
+    VarProxy<T>& to() { return static_cast<VarProxy<T>&>(*this); }
+};
+
 template<>
-struct VarProxy<CClosure> {
-    static bool push(lua_State* st, CClosure c) {
-        lua_pushcclosure(st, c.func, c.upvalues);
+struct VarProxy<CClosure> : VarBase {
+    bool push(CClosure c) {
+        lua_pushcclosure(state, c.func, c.upvalues);
         return true;
     }
 
-    static CClosure get(lua_State* st, int index, bool& success) {
-        auto p = lua_tocfunction(st, index);
+    CClosure get(int index, bool& success) {
+        auto p = lua_tocfunction(state, index);
         if (p) success = true;
         return p;
     }
 };
 
 template<>
-struct VarProxy<std::string> {
-    static bool push(lua_State* st, const std::string& v) {
-        return lua_pushstring(st, v.c_str()) ? true : false;
+struct VarProxy<std::string> : VarBase {
+    bool push(const std::string& v) {
+        return lua_pushstring(state, v.c_str()) ? true : false;
     }
 };
 
 template<>
-struct VarProxy<const char*> {
-    static const char *get(lua_State* st, int index, bool& success) {
-        const char * r = lua_tostring(st, index);
+struct VarProxy<const char*> : VarBase {
+    const char *get(int index, bool& success) {
+        const char * r = lua_tostring(state, index);
         success = r ? true : false;
         return r;
     }
 };
 
 template<>
-struct VarProxy<Number> {
-    static bool push(lua_State* st, Number num) {
-        lua_pushnumber(st, num);
+struct VarProxy<Number> : VarBase  {
+    bool push(Number num) {
+        lua_pushnumber(state, num);
         return true;
     }
 
-    static Number get(lua_State* st, int index, bool& success) {
+    Number get(int index, bool& success) {
         int isnum;
-        Number r = lua_tonumberx(st, index, &isnum);
+        Number r = lua_tonumberx(state, index, &isnum);
         success = r ? true : false;
         return r;
     }
@@ -90,15 +99,13 @@ struct PlaceHolder {};
 
 template<typename Proxy, typename Var>
 struct PredPush {
-    typedef struct { char _[]; } two;
+    typedef struct { char _[2]; } two;
     typedef char one;
 
     template<typename P, typename V>
     static one test(
-            decltype(P::push(
-                static_cast<lua_State*>(nullptr),
-                std::declval<V>()
-            )));
+            decltype(
+                std::declval<VarProxy<P>>().push(std::declval<V>())));
 
     template<typename P, typename V>
     static two test(...);
@@ -109,18 +116,20 @@ struct PredPush {
 
 template<typename Proxy, typename Var>
 struct PredGet {
-    typedef struct { char _[]; } two;
+    typedef struct { char _[2]; } two;
     typedef char one;
 
     template<typename P, typename V>
     static one test(
         typename std::conditional<
             std::is_convertible<
-                decltype(P::get(
-                    static_cast<lua_State*>(nullptr),
-                    static_cast<int>(2),
-                    std::declval<bool&>()
-                )),
+                decltype(
+                    VarBase(static_cast<lua_State*>(nullptr))
+                    .to<P>().get(
+                        static_cast<int>(2),
+                        std::declval<bool&>()
+                    )
+                ),
                 V
             >::value,
             void *,
@@ -140,33 +149,32 @@ struct SelectImpl {
         varproxies,
         PlaceHolder,
         // _1 is state, _2 is current item
-        boost::mpl::if_<Pred<VarProxy<boost::mpl::_2>, T>,
+        boost::mpl::if_<Pred<boost::mpl::_2, T>,
                         boost::mpl::_2, // select current item
                         boost::mpl::_1> // keep last item
-    >::type impl;
-    static_assert( ! std::is_same<PlaceHolder, impl>::value,
+    >::type type;
+    static_assert( ! std::is_same<PlaceHolder, type>::value,
             "no implmentation can be selected for T" );
-    typedef VarProxy<impl> type;
 };
 
 template<>
-struct VarProxy<Nil> {
-    static bool push(lua_State* st, Nil _) {
-        lua_pushnil(st);
+struct VarProxy<Nil> : VarBase {
+    bool push(Nil _) {
+        lua_pushnil(state);
         return true;
     }
 };
 
 template<>
-struct VarProxy<bool> {
-    static bool push(lua_State* st, bool b) {
-        lua_pushboolean(st, b);
+struct VarProxy<bool> : VarBase {
+    bool push(bool b) {
+        lua_pushboolean(state, b);
         return true;
     }
 
-    static bool get(lua_State* st, int index, bool& success) {
+    bool get(int index, bool& success) {
         success = true;
-        return lua_toboolean(st, index);
+        return lua_toboolean(state, index) ? true : false;
     }
 };
 
@@ -220,10 +228,10 @@ template<typename T>
 struct VarPusher {
     typedef typename std::conditional<VarDispatcher<T>::use_indirect_push,
                  typename SelectImpl<PredPush, T>::type,
-                 VarProxy<T>
+                 T
             >::type type;
     static bool push(lua_State* st, const T& v) {
-        return type::push(st, v);
+        return VarBase(st).to<type>().push(v);
     }
 };
 
@@ -231,10 +239,10 @@ template<typename T>
 struct VarGetter {
     typedef typename std::conditional<VarDispatcher<T>::use_indirect_get,
                  typename SelectImpl<PredGet, T>::type,
-                 VarProxy<T>
+                 T
             >::type type;
     static T get(lua_State* st, int index, bool& success) {
-        return type::get(st, index, success);
+        return VarBase(st).to<type>().get(index, success);
     }
 };
 
@@ -289,18 +297,18 @@ struct Table {
 };
 
 template<>
-struct VarProxy<Table> {
-    static bool push(lua_State* st, const Table& tb) {
-        lua_pushnil(st);
-        lua_copy(st, tb.index, -1);
+struct VarProxy<Table> : VarBase {
+    bool push(const Table& tb) {
+        lua_pushnil(state);
+        lua_copy(state, tb.index, -1);
         return true;
     }
 
-    static Table get(lua_State* st, int index, bool& success) {
-        if (!lua_istable(st, index)) {
+    Table get(int index, bool& success) {
+        if (!lua_istable(state, index)) {
             throw RuntimeError("is not a table");
         }
-        return Table(st, index);
+        return Table(state, index);
     }
 };
 
