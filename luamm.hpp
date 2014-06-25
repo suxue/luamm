@@ -693,6 +693,10 @@ public:
         return luaL_loadstring(ptr(), str.c_str());
     }
 
+    int loadFile(const std::string& file) {
+        return luaL_loadfile(ptr(), file.c_str());
+    }
+
     int pcall(int nargs, int nresults, int msgh = 0) {
         return lua_pcall(ptr(), nargs, nresults, msgh);
     }
