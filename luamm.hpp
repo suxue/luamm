@@ -10,6 +10,7 @@
 #include <boost/mpl/pair.hpp>
 #include <boost/mpl/push_back.hpp>
 #include <boost/mpl/fold.hpp>
+#include <iostream>
 
 namespace luamm {
 
@@ -20,12 +21,19 @@ class Nil {};
 
 typedef lua_CFunction CFunction;
 
+struct Closure {
+    int index;
+    Closure(int index) : index(index) {}
+};
+
 struct CClosure {
+    int index;
     CFunction func;
-    int upvalues;
+    // used as in parameter, represents number of upvalues
+    // used as out parameter, represents index in the stack
 public:
-    CClosure(CFunction func, int upvalues = 0)
-        : func(func), upvalues(upvalues) {}
+    CClosure(CFunction func, int index = 0)
+        : index(index), func(func) {}
     operator CFunction() {
         return func;
     }
@@ -33,6 +41,7 @@ public:
 
 template<typename LuaValue>
 struct VarProxy;
+
 
 struct VarBase {
     lua_State *state;
@@ -43,17 +52,36 @@ struct VarBase {
     VarProxy<T>& to() { return static_cast<VarProxy<T>&>(*this); }
 };
 
+
 template<>
 struct VarProxy<CClosure> : VarBase {
     bool push(CClosure c) {
-        lua_pushcclosure(state, c.func, c.upvalues);
+        lua_pushcclosure(state, c.func, c.index);
         return true;
     }
 
     CClosure get(int index, bool& success) {
         auto p = lua_tocfunction(state, index);
         if (p) success = true;
-        return p;
+        return CClosure(p, lua_absindex(state, index));
+    }
+};
+
+template<>
+struct VarProxy<Closure> : VarBase {
+    bool push(Closure c) {
+        lua_pushnil(state);
+        lua_copy(state, c.index, -1);
+        return true;
+    }
+
+    Closure get(int index, bool& success) {
+        if (lua_isfunction(state, index)) {
+            success = true;
+            return Closure(lua_absindex(state, index));
+        } else {
+            return Closure(0);
+        }
     }
 };
 
@@ -83,12 +111,13 @@ struct VarProxy<Number> : VarBase  {
     Number get(int index, bool& success) {
         int isnum;
         Number r = lua_tonumberx(state, index, &isnum);
-        success = r ? true : false;
+        success = isnum ? true : false;
         return r;
     }
 };
 
 
+struct Table;
 typedef boost::mpl::list<
             std::string,
             const char*,
@@ -144,7 +173,8 @@ struct PredGet {
 };
 
 template<template<class, class> class Pred, typename T>
-struct SelectImpl {
+struct SelectImpl
+{
     typedef typename boost::mpl::fold<
         varproxies,
         PlaceHolder,
@@ -153,8 +183,6 @@ struct SelectImpl {
                         boost::mpl::_2, // select current item
                         boost::mpl::_1> // keep last item
     >::type type;
-    static_assert( ! std::is_same<PlaceHolder, type>::value,
-            "no implmentation can be selected for T" );
 };
 
 template<>
@@ -178,6 +206,45 @@ struct VarProxy<bool> : VarBase {
     }
 };
 
+template<typename Container, typename Key>
+struct Accessor;
+
+template<typename Container, typename Key, typename KeyStore = Key>
+class Variant  {
+    KeyStore index;
+    Container state;
+public:
+    Variant(Container st, const Key& i) : index(i), state(st) {}
+
+    template<typename T>
+    operator T() {
+        return Accessor<Container, KeyStore>::template get<T>(state, index);
+    }
+
+    template<typename T>
+    Variant& operator=(const T& var) {
+        Accessor<Container, KeyStore>::template set<T>(state, index, var);
+        return *this;
+    }
+
+    int type() {
+        return Accessor<Container, KeyStore>::type(state, index);
+    }
+};
+
+template<typename T>
+struct VarPusher;
+
+struct Table {
+    lua_State* state;
+    int index;
+    Table(lua_State* st, int i) : state(st), index(i) {}
+
+    template<typename T>
+    Variant<Table*, T, typename VarPusher<T>::type> operator[](const T& k) {
+        return  Variant<Table*, T, typename VarPusher<T>::type>(this, k);
+    }
+};
 
 struct RuntimeError : std::runtime_error {
     RuntimeError(const std::string& s) : std::runtime_error(s) {}
@@ -187,8 +254,6 @@ struct KeyPutError : RuntimeError { KeyPutError() : RuntimeError("") {} };
 struct VarGetError : RuntimeError { VarGetError() : RuntimeError("") {} };
 struct VarPushError : RuntimeError { VarPushError() : RuntimeError("") {} };
 
-template<typename Container, typename Key>
-struct SetterGetter;
 
 template<typename Exception>
 struct Guard {
@@ -203,6 +268,24 @@ class AutoPopper {
 public:
     AutoPopper(lua_State* st, int n = 1) : state(st), n(n) {}
     ~AutoPopper() { if (n > 0) lua_pop(state, n);  }
+};
+
+
+template<>
+struct VarProxy<Table> : VarBase {
+    bool push(const Table& tb) {
+        lua_pushnil(state);
+        lua_copy(state, tb.index, -1);
+        return true;
+    }
+
+    Table get(int index, bool& success) {
+        if (!lua_istable(state, index)) {
+            throw RuntimeError("is not a table");
+        }
+        success = true;
+        return Table(state, lua_absindex(state, index));
+    }
 };
 
 template<typename T>
@@ -230,6 +313,8 @@ struct VarPusher {
                  typename SelectImpl<PredPush, T>::type,
                  T
             >::type type;
+    static_assert( ! std::is_same<PlaceHolder, type>::value,
+            "no push() implmentation can be selected for T" );
     static bool push(lua_State* st, const T& v) {
         return VarBase(st).to<type>().push(v);
     }
@@ -241,13 +326,19 @@ struct VarGetter {
                  typename SelectImpl<PredGet, T>::type,
                  T
             >::type type;
+    static_assert( ! std::is_same<PlaceHolder, type>::value,
+            "no get() implmentation can be selected for T" );
     static T get(lua_State* st, int index, bool& success) {
         return VarBase(st).to<type>().get(index, success);
     }
 };
 
+template<typename Container, typename Key>
+struct Accessor;
+
+// stack + position
 template<>
-struct SetterGetter<lua_State*, int> {
+struct Accessor<lua_State*, int> {
     template<typename Var>
     static Var get(lua_State* container, int key) {
         Guard<VarGetError> gd;
@@ -263,57 +354,63 @@ struct SetterGetter<lua_State*, int> {
         AutoPopper ap(container);
         lua_copy(container, -1, key);
     };
-};
 
-
-template<typename Container, typename Key>
-class Variant  {
-    Key index;
-    Container state;
-public:
-    Variant(Container st, const Key& i) : index(i), state(st) {}
-
-    template<typename T>
-    operator T() {
-        return SetterGetter<Container, Key>::template get<T>(state, index);
-    }
-
-    template<typename T>
-    Variant& operator=(const T& var) {
-        SetterGetter<Container, Key>::template set<T>(state, index, var);
-        return *this;
+    static int type(lua_State* st, int i) {
+        return lua_type(st, i);
     }
 };
 
-struct Table {
-    lua_State* state;
-    int index;
-    Table(lua_State* st, int i) : state(st), index(i) {}
-
-    template<typename T>
-    Variant<Table*, T> operator[](const T& k) {
-        return  Variant<Table*, T>(this, k);
-    }
-};
+// stack variables are not value but a reference to position in the stack
+template<typename T>
+struct StackVariable { enum { value = 0 }; };
 
 template<>
-struct VarProxy<Table> : VarBase {
-    bool push(const Table& tb) {
-        lua_pushnil(state);
-        lua_copy(state, tb.index, -1);
-        return true;
+struct StackVariable<Table> { enum { value = 1 }; };
+
+template<>
+struct StackVariable<Closure> { enum { value = 1 }; };
+
+// global variable key
+template<>
+struct Accessor<lua_State*, std::string> {
+    template<typename Var>
+    static Var get(lua_State* container, const std::string& key) {
+        lua_getglobal(container, key.c_str());
+        Guard<VarGetError> gd;
+        AutoPopper ap(container, 1 - StackVariable<Var>::value);
+        return VarGetter<Var>::get(container, -1, gd.status);
     }
 
-    Table get(int index, bool& success) {
-        if (!lua_istable(state, index)) {
-            throw RuntimeError("is not a table");
+    static int type(lua_State* st, const std::string& k) {
+        lua_getglobal(st, k.c_str());
+        AutoPopper ap(st);
+        return lua_type(st, -1);
+    }
+
+    template<typename Var>
+    static void set(lua_State* container, const std::string& key, const Var& nv) {
+        {
+            Guard<VarPushError> gd;
+            VarPusher<Var>::push(container, nv);
         }
-        return Table(state, index);
+        lua_setglobal(container, key.c_str());
     }
 };
 
+
 template<typename Key>
-struct SetterGetter<Table*, Key> {
+struct Accessor<Table*, Key> {
+
+    static int type(Table *t, const Key& k) {
+        {
+            Guard<VarPushError> gd;
+            gd.status = VarPusher<Key>::push(t->state, k);
+        }
+        lua_gettable(t->state, t->index);
+        AutoPopper ap(t->state);
+        return lua_type(t->state, -1);
+    }
+
     template<typename Var>
     static Var get(Table* container, const Key& key) {
         {
@@ -327,7 +424,7 @@ struct SetterGetter<Table*, Key> {
 
         // return reteieved value
         Guard<VarGetError> gd;
-        AutoPopper ap(container->state);
+        AutoPopper ap(container->state, 1 - StackVariable<Var>::value);
         return VarGetter<Var>::get(container->state, -1, gd.status);
     }
 
@@ -374,8 +471,16 @@ public:
         return Variant<lua_State*, int>(ptr(), pos);
     }
 
+    Variant<lua_State*, std::string> operator[](const std::string& key) {
+        return Variant<lua_State*, std::string>(ptr(), key);
+    }
+
     int top() {
         return lua_gettop(ptr());
+    }
+
+    void openlibs() {
+        luaL_openlibs(ptr());
     }
 };
 
@@ -400,6 +505,7 @@ inline NewState::NewState()
 inline NewState::~NewState() {
     lua_close(ptr());
 }
+
 
 
 } // end namespace

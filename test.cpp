@@ -101,6 +101,7 @@ static int cfunction(lua_State* st) {
 BOOST_AUTO_TEST_CASE( Basic_Load )
 {
     NewState lua;
+    lua.openlibs();
 
     int num = rand();
     lua.push(num);
@@ -117,10 +118,30 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
 
     Table tbl = lua.newTable();
     tbl[1] = "hello";
+    BOOST_CHECK_EQUAL(lua.top(), 4);
+
     BOOST_CHECK_EQUAL((const char*)tbl[1], "hello");
+    BOOST_CHECK_EQUAL(lua.top(), 4);
 
     tbl[2] = cfunction;
     CFunction cfunc = tbl[2];
     BOOST_CHECK_EQUAL(cfunc, cfunction);
+    BOOST_CHECK_EQUAL(lua.top(), 4);
+
+    BOOST_MPL_ASSERT(( std::is_same<VarPusher<Table>::type, Table> ));
+    auto math = lua["math"];
+    BOOST_CHECK_EQUAL(math.type(), LUA_TTABLE);
+
+    Table math_tab = math;
+    BOOST_CHECK_EQUAL(math_tab.index, 5);
+    BOOST_CHECK_EQUAL(lua.top(), 5);
+
+    auto pi = math_tab["pi"];
+    BOOST_CHECK_EQUAL(pi.type(), LUA_TNUMBER);
+    BOOST_CHECK_EQUAL(lua.top(), 5);
+
+    Number pino = pi;
+    BOOST_REQUIRE(pino > 3.14 && pino < 3.15);
+    BOOST_CHECK_EQUAL(lua.top(), 5);
 }
 
