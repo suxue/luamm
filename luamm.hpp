@@ -6,12 +6,29 @@
 #include <functional>
 #include <stdexcept>
 #include <type_traits>
-#include <vector>
+#include <tuple>
 #include <boost/mpl/list.hpp>
 #include <boost/mpl/pair.hpp>
 #include <boost/mpl/push_back.hpp>
 #include <boost/mpl/fold.hpp>
+#include <boost/mpl/size.hpp>
+#include <boost/mpl/transform.hpp>
+#include <boost/function_types/parameter_types.hpp>
+#include <boost/function_types/result_type.hpp>
+
+// make MPL sequences as fusion sequences
+#include <boost/fusion/adapted/mpl.hpp>
+#include <boost/fusion/include/mpl.hpp>
+
+#include <boost/fusion/include/list.hpp>
+
+// convert seq to list
+#include <boost/fusion/container/list/convert.hpp>
+#include <boost/fusion/include/as_list.hpp>
+
+#include <boost/fusion/functional/invocation/invoke.hpp>
 #include <iostream>
+#include <cassert>
 
 namespace luamm {
 
@@ -46,10 +63,12 @@ class Variant  {
     Container state;
 public:
     Variant(Container st, const Key& i) : index(i), state(st) {}
-    Variant(std::vector<Variant>&& vars) : Variant(std::move(vars[0])) {}
+
+    // FIXME permission
+    Variant() {}
 
     template<typename T>
-    operator T() {
+    operator T() const  {
         return Accessor<Container, KeyStore>::template get<T>(state, index);
     }
 
@@ -103,6 +122,12 @@ struct Table {
     Table(Table&& o) : state(o.state), index(o.index) {
         o.state = nullptr;
         o.index = 0;
+    }
+    Table& operator=(Table&& o) {
+        assert(state == 0); assert(index == 0);
+        state = o.state; index = o.index;
+        o.state = nullptr; o.index = 0;
+        return *this;
     }
 private:
     Table(const Table&);
@@ -357,11 +382,12 @@ struct Closure : public HasMetaTable<Closure> {
         if (state) {
             if (lua_gettop(state) == index) {
                 lua_pop(state, 1);
-            } else {
-                throw RuntimeError(
-                    std::string("cannot clean up stack variable (closure)")
-                        + std::to_string(index));
             }
+            //} else {
+                //throw RuntimeError(
+                    //std::string("cannot clean up stack variable (closure)")
+                        //+ std::to_string(index));
+            //}
         }
     }
     Closure(Closure&& o) : state(o.state), index(o.index) {
@@ -420,10 +446,10 @@ private:
 };
 
 template<>
-void Closure::__return__<0>() {}
+inline void Closure::__return__<0>() {}
 
 template<>
-typename Closure::Rvals<1>::type Closure::__return__<1>() {
+inline typename Closure::Rvals<1>::type Closure::__return__<1>() {
     // auto cleanable variant
     return Closure::Rvals<1>::type(state, lua_gettop(state));
 }
@@ -599,7 +625,7 @@ struct Accessor<lua_State*, int> {
 // that if not on top, do noting
 template<>
 template<typename T>
-Variant<lua_State*, int, int, true>::operator T() {
+Variant<lua_State*, int, int, true>::operator T() const {
     T o = Accessor<lua_State*, int>::template get<T>(state, index);
     if (lua_gettop(state) == index && !StackVariable<T>::value) {
         std::cout << "clean up" << std::endl;
@@ -687,6 +713,10 @@ class State {
 protected:
     lua_State *ptr_;
 public:
+
+    // FIXME, permission
+    State() {}
+
     State(lua_State *p);
     lua_State* ptr();
 
@@ -706,8 +736,8 @@ public:
 
     template<typename T, typename... Args>
     UserData newUserData(Args... args) {
-        static_assert(std::is_trivially_destructible<T>::value,
-                "cannot allocate complex type in userdata");
+        //static_assert(std::is_trivially_destructible<T>::value,
+                //"cannot allocate complex type in userdata");
         void * buf = lua_newuserdata(ptr(), sizeof(T));
         new (buf) T(args...);
         return UserData(ptr(), -1);
@@ -749,7 +779,24 @@ public:
             return Closure(ptr(), -1);
         }
     }
+
+    State& operator=(State&& o) {
+       ptr_ = o.ptr_;
+       o.ptr_ = nullptr;
+       return *this;
+    }
+
+    template<typename F>
+    Closure newCallable(F func);
+
+    State(const State& o);
+
+    int upvalue(int i) {
+        return lua_upvalueindex(i);
+    }
 };
+
+inline State::State(const State& o) : ptr_(o.ptr_) {}
 
 class NewState : public State {
 public:
@@ -780,11 +827,12 @@ inline Table::~Table() {
     if (state) {
         if (lua_gettop(state) == index) {
             lua_pop(state, 1);
-        } else {
-            throw RuntimeError(
-                std::string("cannot clean up stack variable (table)")
-                    + std::to_string(index));
         }
+        //} else {
+            //throw RuntimeError(
+                //std::string("cannot clean up stack variable (table)")
+                    //+ std::to_string(index));
+        //}
     }
 }
 
@@ -792,11 +840,12 @@ inline UserData::~UserData() {
     if (state) {
         if (lua_gettop(state) == index) {
             lua_pop(state, 1);
-        } else {
-            throw RuntimeError(
-                std::string("cannot clean up stack variable (userdata)")
-                    + std::to_string(index));
         }
+        //else {
+            //throw RuntimeError(
+                //std::string("cannot clean up stack variable (userdata)")
+                    //+ std::to_string(index));
+        //}
     }
 }
 
@@ -825,7 +874,7 @@ inline Table Table::get() {
 
 template<typename Sub>
 void HasMetaTable<Sub>::set(const Table& metatab) {
-    Sub* p = static_cast<Sub*>(*this);
+    Sub* p = static_cast<Sub*>(this);
     {
         Guard<VarPushError> gd;
         gd.status = VarPusher<Table>::push(p->state, metatab);
@@ -836,11 +885,118 @@ void HasMetaTable<Sub>::set(const Table& metatab) {
 
 template<typename Sub>
 Table HasMetaTable<Sub>::get() {
-    Sub* p = static_cast<Sub*>(*this);
+    Sub* p = static_cast<Sub*>(this);
     if (!lua_getmetatable(p->state, p->index)) {
         throw NoMetatableError();
     }
     return Table(p->state, -1);
+}
+
+template<typename T> struct CheckParamter { enum { value = 0 }; };
+template<> struct CheckParamter<const char*> { enum { value = 1 }; };
+template<> struct CheckParamter<Number> { enum { value = 1 }; };
+template<> struct CheckParamter<const Table&> { enum { value = 1 }; };
+template<> struct CheckParamter<const Closure&> { enum { value = 1 }; };
+template<> struct CheckParamter<const UserData&> { enum { value = 1 }; };
+template<> struct CheckParamter<void*> { enum { value = 1 }; };
+template<> struct CheckParamter<bool> { enum { value = 1 }; };
+
+template<typename TypeList, typename Tuple, int total, int n>
+struct SetArgument {
+    static_assert(CheckParamter<typename boost::mpl::at_c<TypeList, 0>::type>::value,
+            "not a valid paramter");
+    static void call(Tuple& tuple, State& state) {
+        SetArgument<typename boost::mpl::pop_front<TypeList>::type,
+            Tuple, total, n-1>::call(tuple, state);
+        boost::fusion::at_c<total - n>(tuple) = state[-n];
+    }
+};
+
+template<typename TypeList, typename Tuple, int total>
+struct SetArgument<TypeList, Tuple, total, 0> {
+    static_assert(boost::mpl::size<TypeList>::value == 0, "para not match args");
+    static void call(Tuple& tuple, State& state) {}
+};
+
+template<typename T, int n, typename L = boost::mpl::list<>>
+struct MplList {
+    typedef typename MplList<T, n-1,
+                typename boost::mpl::push_front<L, T>::type>::type type;
+};
+
+template<typename T, typename L>
+struct MplList<T, 0, L> {
+    typedef L type;
+};
+
+template<typename C>
+struct CallableCall {
+    typedef C  lambda_t;
+    // formal parameters
+    typedef typename boost::function_types::parameter_types<
+        decltype(&lambda_t::operator())>::type fullpara_t;
+    typedef typename boost::mpl::pop_front<fullpara_t>::type para_t;
+    static_assert( std::is_same<
+            typename boost::mpl::at_c<para_t, 0>::type,
+            State>::value, "1st parameter should be State"
+    );
+    typedef typename boost::fusion::result_of::as_list<para_t>::type paralist_t;
+    typedef typename boost::fusion::result_of::invoke<C, paralist_t>::type result_t;
+    typedef boost::mpl::size<para_t> nargs_t;
+
+    typedef typename MplList<
+        Variant<lua_State*,int>, nargs_t::value-1>::type args_partial_t;
+    typedef typename boost::mpl::push_front<args_partial_t, State>::type args_t;
+    typedef typename boost::fusion::result_of::as_list<args_t>::type arglist_t;
+
+    static result_t call(C c, lua_State* st) {
+        arglist_t arglist;
+        boost::fusion::at_c<0>(arglist) = State(st);
+        typedef SetArgument<typename boost::mpl::pop_front<para_t>::type,
+            arglist_t,
+            boost::mpl::size<args_t>::value,
+            boost::mpl::size<args_t>::value - 1> setter;
+        setter::call(arglist, boost::fusion::at_c<0>(arglist));
+        return boost::fusion::invoke<C, paralist_t>(c, arglist);
+    }
+};
+
+extern int luamm_cclosure(lua_State*);
+extern int luamm_cleanup(lua_State*);
+
+typedef std::function<int(lua_State*)> lua_Lambda;
+
+template<typename F>
+Closure State::newCallable(F func)
+{
+    typedef typename CallableCall<F>::nargs_t nargs_t;
+
+    lua_Lambda lambda = [func](lua_State* st) -> int {
+        // allocate a slot for return value
+        State lua(st);
+        auto rt_pos = lua_absindex(st, -1 - nargs_t::value);
+        lua_pushnil(st);
+        lua_insert(st, rt_pos);
+
+        {
+            auto r = CallableCall<F>::call(func, st);
+            lua[rt_pos] = r;
+        }
+
+        // cut extra stack slots
+        lua_settop(st, rt_pos);
+        return 1;
+    };
+
+    push(CClosure(luamm_cclosure, 1));
+    Closure closure = this->operator[](-1);
+    UserData ud = newUserData<lua_Lambda>(lambda);
+    Table mtab = newTable();
+    mtab["__gc"] = CClosure(luamm_cleanup);
+    ud.set(mtab);
+    closure[1] = ud;
+
+    return closure;
 }
 
 } // end namespace

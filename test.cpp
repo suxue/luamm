@@ -218,8 +218,19 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
 
     {
         Closure log = lua.newFunc("return math.log(...)");
-        BOOST_CHECK_EQUAL(Number( log(100) ), std::log(100));
+        // lua not distinguishes string and number
+        BOOST_CHECK_EQUAL(Number( log("100") ), std::log(100));
     }
+    BOOST_CHECK_EQUAL(lua.top(), 3);
+
+    {
+        Closure cl = lua.newCallable([](State st, Number num) -> Number {
+            return num + 1;
+        });
+        Number num = cl(1);
+        BOOST_CHECK_EQUAL(num, 2);
+    }
+
     BOOST_CHECK_EQUAL(lua.top(), 3);
 }
 
