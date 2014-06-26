@@ -6,6 +6,7 @@
 #include <functional>
 #include <stdexcept>
 #include <type_traits>
+#include <vector>
 #include <boost/mpl/list.hpp>
 #include <boost/mpl/pair.hpp>
 #include <boost/mpl/push_back.hpp>
@@ -38,12 +39,14 @@ struct VarPusher;
 template<typename Container, typename Key>
 struct Accessor;
 
-template<typename Container, typename Key, typename KeyStore = Key>
+template<typename Container, typename Key,
+        typename KeyStore = Key, bool autoclean = false>
 class Variant  {
     KeyStore index;
     Container state;
 public:
     Variant(Container st, const Key& i) : index(i), state(st) {}
+    Variant(std::vector<Variant>&& vars) : Variant(std::move(vars[0])) {}
 
     template<typename T>
     operator T() {
@@ -79,6 +82,7 @@ public:
         return true;
     }
 };
+
 
 struct Table {
     lua_State* state;
@@ -364,31 +368,65 @@ struct Closure : public HasMetaTable<Closure> {
         o.index = 0;
     }
 
+    template<int rvals>
+    struct Rvals {
+        typedef typename std::conditional<rvals == 0,
+                void,
+                typename std::conditional<rvals == 1,
+                    // true => auto cleanable variant
+                    Variant<lua_State*,int, int, true>,
+                    std::array<Variant<lua_State*, int, int, true>, rvals>
+                >::type
+            >::type type;
+    };
+
+    template<int rvals>
+    typename Rvals<rvals>::type __return__();
+
     template<typename... Args>
-    Variant<lua_State*, int> operator()(Args... args) {
-        return call<0, Args...>(args...);
+    Rvals<1>::type operator()(Args... args) {
+        return call(args...);
     }
 
-    template<int count, typename T, typename... Args>
-    Variant<lua_State*, int> call(const T& a, Args... args) {
+    template<int rvals = 1, typename... Args>
+    typename Rvals<rvals>::type call(Args... args) {
+        // push the function to be called
+        lua_pushnil(state);
+        lua_copy(state, index, -1);
+        // passing arguments
+        return __call__<rvals, 0, Args...>(args...);
+    }
+
+    template<int rvals, int count, typename T, typename... Args>
+    typename Rvals<rvals>::type __call__(const T& a, Args... args) {
         {
             Guard<VarPushError> gd;
             gd.status = VarPusher<T>::push(state, a);
         }
-        return this->call<count+1, Args...>(args...);
+        return this->__call__<rvals, count+1, Args...>(args...);
     }
 
-    template<int count>
-    Variant<lua_State*, int> call() {
-        auto i = lua_pcall(state, count, 1, 0);
+    template<int rvals, int count>
+    typename Rvals<rvals>::type __call__() {
+        auto i = lua_pcall(state, count, rvals, 0);
         if (i != LUA_OK) {
             throw RuntimeError();
         }
-        return Variant<lua_State*, int>(state, lua_gettop(state));
+        return __return__<rvals>();
     }
 private:
     Closure(const Closure&);
 };
+
+template<>
+void Closure::__return__<0>() {}
+
+template<>
+typename Closure::Rvals<1>::type Closure::__return__<1>() {
+    // auto cleanable variant
+    return Closure::Rvals<1>::type(state, lua_gettop(state));
+}
+// TODO multiple return values
 
 template<>
 struct StackVariable<Closure> {
@@ -412,9 +450,6 @@ struct VarProxy<Closure> : VarBase {
         }
     }
 };
-
-
-
 
 template<>
 struct StackVariable<Table> {
@@ -557,6 +592,20 @@ struct Accessor<lua_State*, int> {
         return lua_type(st, i);
     }
 };
+
+// auto clean variant if it is not a stack variable(which handle life
+// crycle by itself, this process is conservative:
+// that if not on top, do noting
+template<>
+template<typename T>
+Variant<lua_State*, int, int, true>::operator T() {
+    T o = Accessor<lua_State*, int>::template get<T>(state, index);
+    if (lua_gettop(state) == index && !StackVariable<T>::value) {
+        std::cout << "clean up" << std::endl;
+        lua_pop(state, 1);
+    }
+    return o;
+}
 
 // global variable key
 template<>
