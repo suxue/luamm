@@ -224,13 +224,31 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     BOOST_CHECK_EQUAL(lua.top(), 3);
 
     {
-        Closure cl = lua.newCallable([](State st, Number num) -> Number {
-            return num + 1;
-        });
-        Number num = cl(1);
-        BOOST_CHECK_EQUAL(num, 2);
+        // light cfunction (no upvalue
+        lua.push(CClosure(
+        [](lua_State* st) {
+            // inside a lua cfunction,
+            // the top is 0 initialy, and first argument at position 1, etc
+            // to return values, push first rval first,
+            // finally return number of return values
+            State s(st);
+            Number in = s[1];
+            s.push(in + 1);
+            return 1;
+        }));
+        Number in = rand();
+        Closure cl = lua[-1];
+        BOOST_CHECK_EQUAL( Number(cl(in)), in+1 );
     }
-
     BOOST_CHECK_EQUAL(lua.top(), 3);
+
+    //{
+        //Closure cl = lua.newCallable([](State st, Number num) -> Number {
+            //return num + 1;
+        //});
+        //BOOST_CHECK_EQUAL(lua.top(), 4);
+        ////Number num = cl(1);
+    //}
+
 }
 
