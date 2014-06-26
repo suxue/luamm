@@ -127,6 +127,7 @@ public:
     }
 };
 
+
 struct UserData : HasMetaTable<UserData> {
     lua_State* state;
     int index;
@@ -738,16 +739,15 @@ public:
         return this->operator[](LUA_REGISTRYINDEX);
     }
 
-    int load(const std::string& str) {
-        return luaL_loadstring(ptr(), str.c_str());
-    }
-
-    int loadFile(const std::string& file) {
-        return luaL_loadfile(ptr(), file.c_str());
-    }
-
-    int pcall(int nargs, int nresults, int msgh = 0) {
-        return lua_pcall(ptr(), nargs, nresults, msgh);
+    Closure newFunc(const std::string& str) {
+        auto code =  luaL_loadstring(ptr(), str.c_str());
+        if (code != LUA_OK) {
+            std::string msg = this->operator[](-1);
+            pop();
+            throw RuntimeError(msg);
+        } else {
+            return Closure(ptr(), -1);
+        }
     }
 };
 
