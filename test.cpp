@@ -30,8 +30,6 @@
 #include "luamm.hpp"
 #include <boost/test/unit_test.hpp>
 #include <boost/mpl/assert.hpp>
-#include <boost/mpl/not.hpp>
-#include <boost/mpl/logical.hpp>
 #include <cstdlib>
 #include <cmath>
 #include <functional>
@@ -254,18 +252,19 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     }
     BOOST_CHECK_EQUAL(lua.top(), 3);
 
-    //{
-        //Closure cl = lua.newCallable([](State st, Table& pair) -> Number {
-            //return Number(pair["num1"]) + Number(pair["num2"]);
-        //});
+    {
+        Closure cl = lua.newCallable([](State& st, Table&& pair) -> Number {
+            return Number(pair["num1"]) + Number(pair["num2"]);
+        });
 
-        //Table in = lua.newTable();
-        //in["num1"] = 12;
-        //in["num2"] = 13;
+        Table in = lua.newTable();
+        in["num1"] = 12;
+        in["num2"] = 13;
 
-        //Number num = cl(in);
-        //BOOST_CHECK_EQUAL(num, 25);
-    //}
+        Number num = cl(in);
+        BOOST_CHECK_EQUAL(num, 25);
+    }
+    BOOST_CHECK_EQUAL(lua.top(), 3);
 
 }
 

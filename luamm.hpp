@@ -6,29 +6,11 @@
 #include <functional>
 #include <stdexcept>
 #include <type_traits>
-#include <tuple>
-#include <boost/mpl/list.hpp>
-#include <boost/mpl/pair.hpp>
-#include <boost/mpl/push_back.hpp>
+#include <boost/mpl/vector.hpp>
 #include <boost/mpl/fold.hpp>
 #include <boost/mpl/size.hpp>
-#include <boost/mpl/equal.hpp>
-#include <boost/mpl/transform.hpp>
-#include <boost/mpl/assert.hpp>
 #include <boost/function_types/parameter_types.hpp>
 #include <boost/function_types/result_type.hpp>
-
-// make MPL sequences as fusion sequences
-#include <boost/fusion/adapted/mpl.hpp>
-#include <boost/fusion/include/mpl.hpp>
-
-#include <boost/fusion/include/list.hpp>
-
-// convert seq to list
-#include <boost/fusion/container/list/convert.hpp>
-#include <boost/fusion/include/as_list.hpp>
-
-#include <boost/fusion/functional/invocation/invoke.hpp>
 #include <iostream>
 #include <cassert>
 
@@ -65,9 +47,6 @@ class Variant  {
     Container state;
 public:
     Variant(Container st, const Key& i) : index(i), state(st) {}
-
-    // FIXME permission
-    Variant() {}
 
     template<typename T>
     operator T() const  {
@@ -124,12 +103,6 @@ struct Table {
     Table(Table&& o) : state(o.state), index(o.index) {
         o.state = nullptr;
         o.index = 0;
-    }
-    Table& operator=(Table&& o) {
-        assert(state == 0); assert(index == 0);
-        state = o.state; index = o.index;
-        o.state = nullptr; o.index = 0;
-        return *this;
     }
 private:
     Table(const Table&);
@@ -275,11 +248,12 @@ struct VarProxy<Number> : VarBase  {
 };
 
 
-typedef boost::mpl::list<
+typedef boost::mpl::vector<
             std::string,
             const char*,
             Number,
-            CClosure
+            CClosure,
+            Table
         > varproxies;
 struct PlaceHolder {};
 
@@ -423,26 +397,26 @@ struct Closure : public HasMetaTable<Closure> {
     typename Rvals<rvals>::type __return__();
 
     template <typename... Args>
-    Rvals<1>::type operator()(Args ... args) {
+    Rvals<1>::type operator()(Args&& ... args) {
         return call(std::forward<Args>(args)...);
     }
 
     template<int rvals = 1, typename... Args>
-    typename Rvals<rvals>::type call(Args... args) {
+    typename Rvals<rvals>::type call(Args&&... args) {
         // push the function to be called
         lua_pushnil(state);
         lua_copy(state, index, -1);
         // passing arguments
-        return __call__<rvals, 0, Args...>(args...);
+        return __call__<rvals, 0, Args...>(std::forward<Args>(args)...);
     }
 
     template<int rvals, int count, typename T, typename... Args>
-    typename Rvals<rvals>::type __call__(const T& a, Args... args) {
+    typename Rvals<rvals>::type __call__(T&& a, Args&&... args) {
         {
             Guard<VarPushError> gd;
-            gd.status = VarPusher<T>::push(state, a);
+            gd.status = VarPusher<T>::push(state, std::forward<T>(a));
         }
-        return this->__call__<rvals, count+1, Args...>(args...);
+        return this->__call__<rvals, count+1, Args...>(std::forward<Args>(args)...);
     }
 
     template<int rvals, int count>
@@ -730,9 +704,6 @@ protected:
     lua_State *ptr_;
 public:
 
-    // FIXME, permission
-    State() {}
-
     State(lua_State *p);
     lua_State* ptr();
 
@@ -917,35 +888,9 @@ template<> struct CheckParamter<const UserData&> { enum { value = 1 }; };
 template<> struct CheckParamter<void*> { enum { value = 1 }; };
 template<> struct CheckParamter<bool> { enum { value = 1 }; };
 
-template<typename TypeList, typename Tuple, int n>
-struct SetArgument {
-    static_assert(
-        CheckParamter<typename boost::mpl::at_c<TypeList, 0>::type>::value,
-        "not a valid paramter");
-    static void call(Tuple& tuple, State& state) {
-        SetArgument<typename boost::mpl::pop_front<TypeList>::type,
-            Tuple, n-1>::call(tuple, state);
+template<typename C, int n>
+struct CallLambda;
 
-        // n+1 because the first item is for return value
-        boost::fusion::at_c<n>(tuple) = state[n+1];
-    }
-};
-
-template<typename TypeList, typename Tuple>
-struct SetArgument<TypeList, Tuple, 0> {
-    static void call(Tuple& tuple, State& state) {}
-};
-
-template<typename T, int n, typename L = boost::mpl::list<>>
-struct MplList {
-    typedef typename MplList<T, n-1,
-                typename boost::mpl::push_front<L, T>::type>::type type;
-};
-
-template<typename T, typename L>
-struct MplList<T, 0, L> {
-    typedef L type;
-};
 
 template<typename C>
 struct CallableCall {
@@ -954,49 +899,39 @@ struct CallableCall {
     typedef typename boost::function_types::parameter_types<
         decltype(&lambda_t::operator())>::type fullpara_t;
 
+    typedef typename boost::function_types::result_type<
+        decltype(&lambda_t::operator())>::type result_t;
+
     // paramter list, include the leading State
     typedef typename boost::mpl::pop_front<fullpara_t>::type para_t;
-    static_assert( std::is_same<
-            typename boost::mpl::at_c<para_t, 0>::type,
-            State>::value, "1st parameter should be State"
-    );
-    // paramter list exclude leading State
-    typedef typename boost::mpl::pop_front<para_t>::type nparas_t;
 
-    // paramter list in fusion
-    typedef typename boost::fusion::result_of::as_list<para_t>::type paralist_t;
+    //static_assert( std::is_same<
+            //typename boost::mpl::at_c<para_t, 0>::type,
+            //State&>::value, "1st parameter should be State&"
+    //);
 
-    // deduced return value type
-    typedef typename boost::fusion::result_of::invoke<C, paralist_t>::type result_t;
-
-    // nargs = number of paramters (exclude the leading State)
-    typedef typename boost::mpl::minus<
-        boost::mpl::size<para_t>,
-        boost::mpl::int_<1>>::type nargs_t;
-
-    BOOST_MPL_ASSERT(( boost::mpl::equal<nargs_t, boost::mpl::size<nparas_t>> ));
-
-    typedef typename MplList<
-        Variant<lua_State*,int>, nargs_t::value>::type args_tail_t;
-
-    // concrete paramter types (include leading State)
-    typedef typename boost::mpl::push_front<args_tail_t, State>::type args_t;
-
-    // fusion list of `args_t`
-    typedef typename boost::fusion::result_of::as_list<args_t>::type arglist_t;
+    typedef boost::mpl::size<para_t> nargs_t;
 
     static result_t call(C c, lua_State* st) {
-        arglist_t arglist;
-        boost::fusion::at_c<0>(arglist) = State(st);
-        typedef SetArgument<
-            nparas_t, // for type checking
-            arglist_t,  // paramter storage
-            nargs_t::value  // total number of arguments to set
-        > setter;
-        setter::call(arglist, boost::fusion::at_c<0>(arglist));
-        return boost::fusion::invoke<C, paralist_t>(c, arglist);
+        State state(st);
+        return CallLambda<C, nargs_t::value>::call(c, state);
     }
 };
+
+template<typename C>struct  CallLambda<C, 1> {
+    static typename CallableCall<C>::result_t call(C& func, State& st) {
+        return func(st);
+    }};
+
+template<typename C>struct  CallLambda<C, 2> {
+    static typename CallableCall<C>::result_t call(C& func, State& st) {
+        return func(st, st[2]);
+    }};
+
+template<typename C>struct  CallLambda<C, 3> {
+    static typename CallableCall<C>::result_t call(C& func, State& st) {
+        return func(st, st[2], st[3]);
+    }};
 
 extern int luamm_cclosure(lua_State*);
 extern int luamm_cleanup(lua_State*);
