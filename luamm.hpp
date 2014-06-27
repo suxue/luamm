@@ -907,16 +907,15 @@ struct TypeChecker {
         TypeChecker<TL, n-1>::check(st);
         int rtid = st[n+1].type();
         if (rtid != Getter::tid) {
-            st.error(std::string("function arg#") + std::to_string(n) + " mismatch: expect '" +
-                     st.typerepr(Getter::tid) + "' got '" +
-                     st.typerepr(rtid) + "'");
+            st.error(std::string("bad argument#") + std::to_string(n) + " ("
+                     + st.typerepr(Getter::tid) + " expected, got " +
+                     st.typerepr(rtid) + ")");
         }
     }
 };
 
 template<typename TL>
 struct TypeChecker<TL, 0> { static void check(State& st) {} };
-
 
 template<typename C>
 struct CallableCall {
@@ -930,11 +929,6 @@ struct CallableCall {
 
     // paramter list, include the leading State
     typedef typename boost::mpl::pop_front<fullpara_t>::type para_t;
-
-    //static_assert( std::is_same<
-            //typename boost::mpl::at_c<para_t, 0>::type,
-            //State&>::value, "1st parameter should be State&"
-    //);
 
     typedef boost::mpl::size<para_t> nargs_t;
 
@@ -995,10 +989,20 @@ Closure State::newCallable(F func)
     push(CClosure(luamm_cclosure, 1));
     Closure cl = this->operator[](-1);
     UserData ud = newUserData<lua_Lambda>(lambda);
-    Table mtab = newTable();
 
-    mtab["__gc"] = CClosure(luamm_cleanup);
-    ud.set(mtab);
+    {
+        Table reg = registry();
+        auto gctab = reg["LUAMM_COMMON_GC"];
+        if (!gctab.istab()) {
+            Table mtab = newTable();
+            mtab["__gc"] = CClosure(luamm_cleanup);
+            gctab = mtab;
+        }
+
+        Table mtab = gctab;
+        ud.set(mtab);
+    }
+
     cl[1] = ud;
     return cl;
 }
