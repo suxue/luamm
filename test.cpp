@@ -242,12 +242,29 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     }
     BOOST_CHECK_EQUAL(lua.top(), 3);
 
+    {
+        Closure cl = lua.newCallable([](State st, Number num) -> Number {
+            return num + 7777;
+        });
+        BOOST_CHECK_EQUAL(lua.top(), 4);
+
+        Number in = rand();
+        Number num = cl(in);
+        BOOST_CHECK_EQUAL(num, in + 7777);
+    }
+    BOOST_CHECK_EQUAL(lua.top(), 3);
+
     //{
-        //Closure cl = lua.newCallable([](State st, Number num) -> Number {
-            //return num + 1;
+        //Closure cl = lua.newCallable([](State st, Table& pair) -> Number {
+            //return Number(pair["num1"]) + Number(pair["num2"]);
         //});
-        //BOOST_CHECK_EQUAL(lua.top(), 4);
-        ////Number num = cl(1);
+
+        //Table in = lua.newTable();
+        //in["num1"] = 12;
+        //in["num2"] = 13;
+
+        //Number num = cl(in);
+        //BOOST_CHECK_EQUAL(num, 25);
     //}
 
 }

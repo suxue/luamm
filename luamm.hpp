@@ -12,7 +12,9 @@
 #include <boost/mpl/push_back.hpp>
 #include <boost/mpl/fold.hpp>
 #include <boost/mpl/size.hpp>
+#include <boost/mpl/equal.hpp>
 #include <boost/mpl/transform.hpp>
+#include <boost/mpl/assert.hpp>
 #include <boost/function_types/parameter_types.hpp>
 #include <boost/function_types/result_type.hpp>
 
@@ -370,6 +372,16 @@ struct Guard {
 
 struct VarPushError : RuntimeError { VarPushError() : RuntimeError("") {} };
 
+template<typename T>
+struct PassingConvention {
+    typedef T type;
+};
+
+template<>
+struct PassingConvention<Table> {
+    typedef Table& type;
+};
+
 
 struct Closure : public HasMetaTable<Closure> {
     lua_State* state;
@@ -410,9 +422,9 @@ struct Closure : public HasMetaTable<Closure> {
     template<int rvals>
     typename Rvals<rvals>::type __return__();
 
-    template<typename... Args>
-    Rvals<1>::type operator()(Args... args) {
-        return call(args...);
+    template <typename... Args>
+    Rvals<1>::type operator()(Args ... args) {
+        return call(std::forward<Args>(args)...);
     }
 
     template<int rvals = 1, typename... Args>
@@ -443,6 +455,11 @@ struct Closure : public HasMetaTable<Closure> {
     }
 private:
     Closure(const Closure&);
+};
+
+template<>
+struct PassingConvention<Closure> {
+    typedef Closure& type;
 };
 
 template<>
@@ -628,7 +645,6 @@ template<typename T>
 Variant<lua_State*, int, int, true>::operator T() const {
     T o = Accessor<lua_State*, int>::template get<T>(state, index);
     if (lua_gettop(state) == index && !StackVariable<T>::value) {
-        std::cout << "clean up" << std::endl;
         lua_pop(state, 1);
     }
     return o;
@@ -892,7 +908,7 @@ Table HasMetaTable<Sub>::get() {
     return Table(p->state, -1);
 }
 
-template<typename T> struct CheckParamter { enum { value = 0 }; };
+template<typename T> struct CheckParamter { enum { value = 1 }; };
 template<> struct CheckParamter<const char*> { enum { value = 1 }; };
 template<> struct CheckParamter<Number> { enum { value = 1 }; };
 template<> struct CheckParamter<const Table&> { enum { value = 1 }; };
@@ -901,20 +917,22 @@ template<> struct CheckParamter<const UserData&> { enum { value = 1 }; };
 template<> struct CheckParamter<void*> { enum { value = 1 }; };
 template<> struct CheckParamter<bool> { enum { value = 1 }; };
 
-template<typename TypeList, typename Tuple, int total, int n>
+template<typename TypeList, typename Tuple, int n>
 struct SetArgument {
-    static_assert(CheckParamter<typename boost::mpl::at_c<TypeList, 0>::type>::value,
-            "not a valid paramter");
+    static_assert(
+        CheckParamter<typename boost::mpl::at_c<TypeList, 0>::type>::value,
+        "not a valid paramter");
     static void call(Tuple& tuple, State& state) {
         SetArgument<typename boost::mpl::pop_front<TypeList>::type,
-            Tuple, total, n-1>::call(tuple, state);
-        boost::fusion::at_c<total - n>(tuple) = state[-n];
+            Tuple, n-1>::call(tuple, state);
+
+        // n+1 because the first item is for return value
+        boost::fusion::at_c<n>(tuple) = state[n+1];
     }
 };
 
-template<typename TypeList, typename Tuple, int total>
-struct SetArgument<TypeList, Tuple, total, 0> {
-    static_assert(boost::mpl::size<TypeList>::value == 0, "para not match args");
+template<typename TypeList, typename Tuple>
+struct SetArgument<TypeList, Tuple, 0> {
     static void call(Tuple& tuple, State& state) {}
 };
 
@@ -935,27 +953,46 @@ struct CallableCall {
     // formal parameters
     typedef typename boost::function_types::parameter_types<
         decltype(&lambda_t::operator())>::type fullpara_t;
+
+    // paramter list, include the leading State
     typedef typename boost::mpl::pop_front<fullpara_t>::type para_t;
     static_assert( std::is_same<
             typename boost::mpl::at_c<para_t, 0>::type,
             State>::value, "1st parameter should be State"
     );
+    // paramter list exclude leading State
+    typedef typename boost::mpl::pop_front<para_t>::type nparas_t;
+
+    // paramter list in fusion
     typedef typename boost::fusion::result_of::as_list<para_t>::type paralist_t;
+
+    // deduced return value type
     typedef typename boost::fusion::result_of::invoke<C, paralist_t>::type result_t;
-    typedef boost::mpl::size<para_t> nargs_t;
+
+    // nargs = number of paramters (exclude the leading State)
+    typedef typename boost::mpl::minus<
+        boost::mpl::size<para_t>,
+        boost::mpl::int_<1>>::type nargs_t;
+
+    BOOST_MPL_ASSERT(( boost::mpl::equal<nargs_t, boost::mpl::size<nparas_t>> ));
 
     typedef typename MplList<
-        Variant<lua_State*,int>, nargs_t::value-1>::type args_partial_t;
-    typedef typename boost::mpl::push_front<args_partial_t, State>::type args_t;
+        Variant<lua_State*,int>, nargs_t::value>::type args_tail_t;
+
+    // concrete paramter types (include leading State)
+    typedef typename boost::mpl::push_front<args_tail_t, State>::type args_t;
+
+    // fusion list of `args_t`
     typedef typename boost::fusion::result_of::as_list<args_t>::type arglist_t;
 
     static result_t call(C c, lua_State* st) {
         arglist_t arglist;
         boost::fusion::at_c<0>(arglist) = State(st);
-        typedef SetArgument<typename boost::mpl::pop_front<para_t>::type,
-            arglist_t,
-            boost::mpl::size<args_t>::value,
-            boost::mpl::size<args_t>::value - 1> setter;
+        typedef SetArgument<
+            nparas_t, // for type checking
+            arglist_t,  // paramter storage
+            nargs_t::value  // total number of arguments to set
+        > setter;
         setter::call(arglist, boost::fusion::at_c<0>(arglist));
         return boost::fusion::invoke<C, paralist_t>(c, arglist);
     }
@@ -969,34 +1006,30 @@ typedef std::function<int(lua_State*)> lua_Lambda;
 template<typename F>
 Closure State::newCallable(F func)
 {
-    typedef typename CallableCall<F>::nargs_t nargs_t;
-
     lua_Lambda lambda = [func](lua_State* st) -> int {
         // allocate a slot for return value
         State lua(st);
-        auto rt_pos = lua_absindex(st, -1 - nargs_t::value);
+
+        // shift +1 to allocate slot for return value
         lua_pushnil(st);
-        lua_insert(st, rt_pos);
+        lua_insert(st, 1);
 
-        {
-            auto r = CallableCall<F>::call(func, st);
-            lua[rt_pos] = r;
-        }
+        lua[1] = CallableCall<F>::call(func, st);
 
-        // cut extra stack slots
-        lua_settop(st, rt_pos);
+        // leave return value one the stack, wipe out other things
+        lua_settop(st, 1);
         return 1;
     };
 
     push(CClosure(luamm_cclosure, 1));
-    Closure closure = this->operator[](-1);
+    Closure cl = this->operator[](-1);
     UserData ud = newUserData<lua_Lambda>(lambda);
     Table mtab = newTable();
+
     mtab["__gc"] = CClosure(luamm_cleanup);
     ud.set(mtab);
-    closure[1] = ud;
-
-    return closure;
+    cl[1] = ud;
+    return cl;
 }
 
 } // end namespace
