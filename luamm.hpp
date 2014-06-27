@@ -12,8 +12,6 @@
 #include <boost/function_types/parameter_types.hpp>
 #include <boost/function_types/result_type.hpp>
 #include <boost/preprocessor.hpp>
-#include <iostream>
-#include <cassert>
 
 namespace luamm {
 
@@ -735,8 +733,6 @@ public:
 
     template<typename T, typename... Args>
     UserData newUserData(Args... args) {
-        //static_assert(std::is_trivially_destructible<T>::value,
-                //"cannot allocate complex type in userdata");
         void * buf = lua_newuserdata(ptr(), sizeof(T));
         new (buf) T(args...);
         return UserData(ptr(), -1);
@@ -796,6 +792,15 @@ public:
 
     const char *typerepr(int tid) {
         return lua_typename(ptr(), tid);
+    }
+
+    void allocate(int i) {
+        lua_pushnil(ptr());
+        lua_insert(ptr(), i);
+    }
+
+    void settop(int i) {
+        lua_settop(ptr(), i);
     }
 };
 
