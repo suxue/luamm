@@ -191,6 +191,7 @@ struct VarProxy<void*> : VarBase {
         if (p) success = true;
         return p;
     }
+    enum { tid = LUA_TLIGHTUSERDATA };
 };
 
 template<>
@@ -205,6 +206,7 @@ struct VarProxy<UserData> : VarBase {
         success = true;
         return UserData(state, index);
     }
+    enum { tid = LUA_TUSERDATA };
 };
 
 template<>
@@ -214,6 +216,7 @@ struct VarProxy<CFunction> : VarBase {
         if (p) success = true;
         return p;
     }
+    enum { tid = LUA_TFUNCTION };
 };
 
 
@@ -231,6 +234,7 @@ struct VarProxy<const char*> : VarBase {
         success = r ? true : false;
         return r;
     }
+    enum { tid = LUA_TSTRING};
 };
 
 template<>
@@ -246,6 +250,7 @@ struct VarProxy<Number> : VarBase  {
         success = isnum ? true : false;
         return r;
     }
+    enum { tid = LUA_TNUMBER };
 };
 
 
@@ -323,6 +328,7 @@ struct VarProxy<Nil> : VarBase {
         lua_pushnil(state);
         return true;
     }
+    enum { tid = LUA_TNIL};
 };
 
 template<>
@@ -336,6 +342,7 @@ struct VarProxy<bool> : VarBase {
         success = true;
         return lua_toboolean(state, index) ? true : false;
     }
+    enum { tid = LUA_TBOOLEAN};
 };
 
 template<typename Exception>
@@ -424,7 +431,9 @@ struct Closure : public HasMetaTable<Closure> {
     typename Rvals<rvals>::type __call__() {
         auto i = lua_pcall(state, count, rvals, 0);
         if (i != LUA_OK) {
-            throw RuntimeError();
+            if (lua_type(state, -1) == LUA_TSTRING) {
+                throw RuntimeError(lua_tostring(state, -1));
+            }
         }
         return __return__<rvals>();
     }
@@ -468,6 +477,7 @@ struct VarProxy<Closure> : VarBase {
             return Closure(nullptr, 0);
         }
     }
+    enum { tid = LUA_TFUNCTION };
 };
 
 template<>
@@ -505,6 +515,7 @@ struct VarProxy<Table> : VarBase {
         success = true;
         return Table(state, index);
     }
+    enum { tid = LUA_TTABLE };
 };
 
 template<typename T>
@@ -782,6 +793,10 @@ public:
     int upvalue(int i) {
         return lua_upvalueindex(i);
     }
+
+    const char *typerepr(int tid) {
+        return lua_typename(ptr(), tid);
+    }
 };
 
 inline State::State(const State& o) : ptr_(o.ptr_) {}
@@ -883,6 +898,25 @@ Table HasMetaTable<Sub>::get() {
 template<typename C, int n>
 struct CallLambda;
 
+template<typename TL, int n>
+struct TypeChecker {
+    typedef typename boost::mpl::at_c<TL, n>::type Elem;
+    typedef VarProxy<typename VarGetter<Elem>::type> Getter;
+    static_assert(Getter::tid >= 0, "not a valid type");
+    static void check(State& st) {
+        TypeChecker<TL, n-1>::check(st);
+        int rtid = st[n+1].type();
+        if (rtid != Getter::tid) {
+            st.error(std::string("function arg#") + std::to_string(n) + " mismatch: expect '" +
+                     st.typerepr(Getter::tid) + "' got '" +
+                     st.typerepr(rtid) + "'");
+        }
+    }
+};
+
+template<typename TL>
+struct TypeChecker<TL, 0> { static void check(State& st) {} };
+
 
 template<typename C>
 struct CallableCall {
@@ -906,6 +940,8 @@ struct CallableCall {
 
     static result_t call(C c, lua_State* st) {
         State state(st);
+        // type checking
+        TypeChecker<para_t, boost::mpl::size<para_t>::value - 1>::check(state);
         return CallLambda<C, nargs_t::value>::call(c, state);
     }
 };
