@@ -11,6 +11,7 @@
 #include <boost/mpl/size.hpp>
 #include <boost/function_types/parameter_types.hpp>
 #include <boost/function_types/result_type.hpp>
+#include <boost/preprocessor.hpp>
 #include <iostream>
 #include <cassert>
 
@@ -879,15 +880,6 @@ Table HasMetaTable<Sub>::get() {
     return Table(p->state, -1);
 }
 
-template<typename T> struct CheckParamter { enum { value = 1 }; };
-template<> struct CheckParamter<const char*> { enum { value = 1 }; };
-template<> struct CheckParamter<Number> { enum { value = 1 }; };
-template<> struct CheckParamter<const Table&> { enum { value = 1 }; };
-template<> struct CheckParamter<const Closure&> { enum { value = 1 }; };
-template<> struct CheckParamter<const UserData&> { enum { value = 1 }; };
-template<> struct CheckParamter<void*> { enum { value = 1 }; };
-template<> struct CheckParamter<bool> { enum { value = 1 }; };
-
 template<typename C, int n>
 struct CallLambda;
 
@@ -921,17 +913,25 @@ struct CallableCall {
 template<typename C>struct  CallLambda<C, 1> {
     static typename CallableCall<C>::result_t call(C& func, State& st) {
         return func(st);
-    }};
+    }}; // special case, c function has no argument
 
-template<typename C>struct  CallLambda<C, 2> {
-    static typename CallableCall<C>::result_t call(C& func, State& st) {
-        return func(st, st[2]);
-    }};
+#ifndef LUAMM_LAMBDA_PARANUMBER
+#define LUAMM_LAMBDA_PARANUMBER 15
+#endif
+#define LUAMM_ARGPACK(n) st[n]
+#define LUAMM_ARGLIST(z, n, _) LUAMM_ARGPACK(BOOST_PP_ADD(n, 2)),
+#define LUAMM_ARG(n) BOOST_PP_REPEAT(BOOST_PP_SUB(n, 1), LUAMM_ARGLIST, ) LUAMM_ARGPACK(BOOST_PP_INC(n))
+#define LUAMM_TEMPL(_a, n, _b) template<typename C>struct CallLambda<C, n> {\
+    static typename CallableCall<C>::result_t call(C& func, State& st) {\
+        return func(st, LUAMM_ARG(BOOST_PP_SUB(n,1))); }};
 
-template<typename C>struct  CallLambda<C, 3> {
-    static typename CallableCall<C>::result_t call(C& func, State& st) {
-        return func(st, st[2], st[3]);
-    }};
+BOOST_PP_REPEAT_FROM_TO(2, LUAMM_LAMBDA_PARANUMBER, LUAMM_TEMPL,)
+#undef LUAMM_ARGPACK
+#undef LUAMM_ARGLIST
+#undef LUAMM_ARG
+#undef LUAMM_TEMPL
+#undef LUAMM_LAMBDA_PARANUMBER
+
 
 extern int luamm_cclosure(lua_State*);
 extern int luamm_cleanup(lua_State*);
