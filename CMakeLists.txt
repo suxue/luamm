@@ -20,16 +20,28 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+cmake_minimum_required(VERSION 3.0)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
+
+find_package(C11)
+Find_package(MyBoost)
+
+# actually we need lua52
+find_package(Lua51)
+include_directories(${LUA_INCLUDE_DIR})
+MESSAGE(STATUS "LUA_FOUND = ${LUA51_FOUND}")
+MESSAGE(STATUS "LUA_INCLUDE_DIR = ${LUA_INCLUDE_DIR}")
+MESSAGE(STATUS "LUA_LIBRARY = ${LUA_LIBRARIES}")
+
 add_library(luamm luamm.cpp)
 target_link_libraries(luamm ${LUA_LIBRARIES})
 
+target_include_directories(luamm INTERFACE ./)
+target_include_directories(luamm PRIVATE ${LUA_INCLUDE_DIR})
 
 add_executable(luamm_test test.cpp)
 target_link_libraries(luamm_test ${Boost_TEST_EXEC_MONITOR_LIBRARY})
 target_link_libraries(luamm_test luamm)
 
-#if(NOT MSVC)
-    #add_subdirectory(demos)
-    #endif()
-
+enable_testing ()
 add_test (NAME luamm_test COMMAND luamm_test -o=report)
