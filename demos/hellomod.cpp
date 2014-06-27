@@ -27,7 +27,7 @@ extern "C" int luaopen_hello(lua_State *L) {
     const char *modfile = st[3];
 
     Table mod = reg(st);
-    cout << "load " << modname << " from " << modfile << endl;
+    cerr << "load " << modname << " from " << modfile << endl;
 
     st[1] = mod;
     st.settop(1);

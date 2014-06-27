@@ -20,38 +20,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-cmake_minimum_required(VERSION 3.0)
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
+add_library(hellomod MODULE hellomod.cpp)
+target_link_libraries(hellomod luamm)
+set_target_properties(hellomod  PROPERTIES OUTPUT_NAME hello PREFIX "")
 
-find_package(C11)
-Find_package(MyBoost)
+#add_custom_command(TARGET hellomod POST_BUILD
+    #COMMAND lua ${CMAKE_CURRENT_SOURCE_DIR}/hellomod.lua)
+#add_custom_target(hellomod_test COMMAND
+    #lua ${CMAKE_CURRENT_SOURCE_DIR}/hellomod.lua DEPENDS hellomod)
 
-# actually we need lua52
-find_package(Lua51)
-include_directories(${LUA_INCLUDE_DIR})
-MESSAGE(STATUS "LUA_FOUND = ${LUA51_FOUND}")
-MESSAGE(STATUS "LUA_INCLUDE_DIR = ${LUA_INCLUDE_DIR}")
-MESSAGE(STATUS "LUA_LIBRARY = ${LUA_LIBRARIES}")
-
-add_library(luamm luamm.cpp)
-target_link_libraries(luamm ${LUA_LIBRARIES})
-
-target_include_directories(luamm INTERFACE ./)
-target_include_directories(luamm PRIVATE ${LUA_INCLUDE_DIR})
-set_property(TARGET luamm APPEND PROPERTY COMPILE_FLAGS "-fPIC")
-
-add_executable(luamm_test test.cpp)
-target_link_libraries(luamm_test ${Boost_TEST_EXEC_MONITOR_LIBRARY})
-target_link_libraries(luamm_test luamm)
-
-enable_testing ()
-
-if (BUILD_DEMOS)
-    add_subdirectory(demos)
-endif()
-
-ADD_TEST(NAME testdep/luamm  COMMAND "${CMAKE_COMMAND}" --build
-    ${CMAKE_BINARY_DIR} --target luamm_test)
-add_test (NAME test/luamm COMMAND luamm_test -o=report)
-
-SET_TESTS_PROPERTIES ( test/luamm PROPERTIES DEPENDS testdep/luamm )
+ADD_TEST(NAME testdep/modhello  COMMAND "${CMAKE_COMMAND}" --build
+    ${CMAKE_BINARY_DIR} --target hellomod)
+ADD_TEST(test/modhello
+    lua ${CMAKE_CURRENT_SOURCE_DIR}/hellomod.lua
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+SET_TESTS_PROPERTIES ( test/modhello PROPERTIES DEPENDS testdep/modhello)
