@@ -257,7 +257,9 @@ typedef boost::mpl::vector<
             const char*,
             Number,
             CClosure,
-            Table
+            Table,
+            UserData,
+            Nil
         > varproxies;
 struct PlaceHolder {};
 
@@ -655,7 +657,7 @@ struct Accessor<lua_State*, std::string> {
     static void set(lua_State* container, const std::string& key, const Var& nv) {
         {
             Guard<VarPushError> gd;
-            VarPusher<Var>::push(container, nv);
+            gd.status = VarPusher<Var>::push(container, nv);
         }
         lua_setglobal(container, key.c_str());
     }
@@ -766,6 +768,17 @@ public:
 
     Closure newFunc(const std::string& str) {
         auto code =  luaL_loadstring(ptr(), str.c_str());
+        if (code != LUA_OK) {
+            std::string msg = this->operator[](-1);
+            pop();
+            throw RuntimeError(msg);
+        } else {
+            return Closure(ptr(), -1);
+        }
+    }
+
+    Closure newFile(const std::string& filename) {
+        auto code = luaL_loadfile(ptr(), filename.c_str());
         if (code != LUA_OK) {
             std::string msg = this->operator[](-1);
             pop();
