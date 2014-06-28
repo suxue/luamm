@@ -33,12 +33,13 @@ MESSAGE(STATUS "LUA_FOUND = ${LUA51_FOUND}")
 MESSAGE(STATUS "LUA_INCLUDE_DIR = ${LUA_INCLUDE_DIR}")
 MESSAGE(STATUS "LUA_LIBRARY = ${LUA_LIBRARIES}")
 
-add_library(luamm luamm.cpp)
+add_library(luamm STATIC luamm.hpp)
+set_target_properties(luamm PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(luamm ${LUA_LIBRARIES})
 
 target_include_directories(luamm INTERFACE ./)
 target_include_directories(luamm PRIVATE ${LUA_INCLUDE_DIR})
-set_property(TARGET luamm APPEND PROPERTY COMPILE_FLAGS "-fPIC")
+#set_property(TARGET luamm APPEND PROPERTY COMPILE_FLAGS "-fPIC")
 
 add_executable(luamm_test test.cpp)
 target_link_libraries(luamm_test ${Boost_TEST_EXEC_MONITOR_LIBRARY})

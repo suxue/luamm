@@ -981,10 +981,29 @@ BOOST_PP_REPEAT_FROM_TO(2, LUAMM_LAMBDA_PARANUMBER, LUAMM_TEMPL,)
 #undef LUAMM_LAMBDA_PARANUMBER
 
 
-extern int luamm_cclosure(lua_State*);
-extern int luamm_cleanup(lua_State*);
-
 typedef std::function<int(lua_State*)> lua_Lambda;
+
+namespace {
+    struct helper {
+
+        static int luamm_cclosure(lua_State* _)
+        {
+            State st(_);
+            UserData ud = st[st.upvalue(1)];
+            auto lambda = ud.to<lua_Lambda>();
+            return lambda->operator()(_);
+        }
+
+        static int luamm_cleanup(lua_State* _)
+        {
+            State st(_);
+            UserData ud = st[1];
+            auto lambda = ud.to<lua_Lambda>();
+            lambda->~lua_Lambda();
+            return 0;
+        }
+    };
+}
 
 template<typename F>
 Closure State::newCallable(F func)
@@ -1004,7 +1023,7 @@ Closure State::newCallable(F func)
         return 1;
     };
 
-    push(CClosure(luamm_cclosure, 1));
+    push(CClosure(&helper::luamm_cclosure, 1));
     Closure cl = this->operator[](-1);
     UserData ud = newUserData<lua_Lambda>(lambda);
 
@@ -1013,7 +1032,7 @@ Closure State::newCallable(F func)
         auto gctab = reg["LUAMM_COMMON_GC"];
         if (!gctab.istab()) {
             Table mtab = newTable();
-            mtab["__gc"] = CClosure(luamm_cleanup);
+            mtab["__gc"] = CClosure(helper::luamm_cleanup);
             gctab = mtab;
         }
 
