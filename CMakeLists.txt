@@ -33,7 +33,7 @@ MESSAGE(STATUS "LUA_FOUND = ${LUA51_FOUND}")
 MESSAGE(STATUS "LUA_INCLUDE_DIR = ${LUA_INCLUDE_DIR}")
 MESSAGE(STATUS "LUA_LIBRARY = ${LUA_LIBRARIES}")
 
-add_library(luamm STATIC luamm.hpp)
+add_library(luamm STATIC luamm.cpp)
 set_target_properties(luamm PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(luamm ${LUA_LIBRARIES})
 

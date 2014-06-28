@@ -2,15 +2,18 @@
 #define LUAMM_HPP
 
 #include <lua.hpp>
-#include <string>
+
+#include <array>
 #include <functional>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
-#include <boost/mpl/vector.hpp>
-#include <boost/mpl/fold.hpp>
-#include <boost/mpl/size.hpp>
+
 #include <boost/function_types/parameter_types.hpp>
 #include <boost/function_types/result_type.hpp>
+#include <boost/mpl/fold.hpp>
+#include <boost/mpl/size.hpp>
+#include <boost/mpl/vector.hpp>
 #include <boost/preprocessor.hpp>
 
 namespace luamm {
@@ -39,13 +42,13 @@ struct VarPusher;
 template<typename Container, typename Key>
 struct Accessor;
 
-template<typename Container, typename Key,
-        typename KeyStore = Key, bool autoclean = false>
+template<typename Container, typename Key, typename KeyStore = Key>
 class Variant  {
     KeyStore index;
     Container state;
 public:
-    Variant(Container st, const Key& i) : index(i), state(st) {}
+    Variant(Container st, const Key& i)
+        : index(i), state(st) {}
 
     template<typename T>
     operator T() const  {
@@ -79,6 +82,20 @@ public:
             return false;
         }
         return true;
+    }
+};
+
+class AutoCleanVariant : public Variant<lua_State*, int> {
+public:
+    AutoCleanVariant(lua_State*st, int i) : Variant<lua_State*,int>(st,i) {}
+
+    template<typename T>
+    operator T() const {
+        T o = Variant<lua_State*, int>::operator T();
+        if (lua_gettop(state) == index && !StackVariable<T>::value) {
+            lua_pop(state, 1);
+        }
+        return o;
     }
 };
 
@@ -395,8 +412,8 @@ struct Closure : public HasMetaTable<Closure> {
                 void,
                 typename std::conditional<rvals == 1,
                     // true => auto cleanable variant
-                    Variant<lua_State*,int, int, true>,
-                    std::array<Variant<lua_State*, int, int, true>, rvals>
+                    AutoCleanVariant,
+                    std::array<Variant<lua_State*, int, int>, rvals>
                 >::type
             >::type type;
     };
@@ -626,15 +643,6 @@ struct Accessor<lua_State*, int> {
 // auto clean variant if it is not a stack variable(which handle life
 // crycle by itself, this process is conservative:
 // that if not on top, do noting
-template<>
-template<typename T>
-Variant<lua_State*, int, int, true>::operator T() const {
-    T o = Accessor<lua_State*, int>::template get<T>(state, index);
-    if (lua_gettop(state) == index && !StackVariable<T>::value) {
-        lua_pop(state, 1);
-    }
-    return o;
-}
 
 // global variable key
 template<>

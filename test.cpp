@@ -70,6 +70,7 @@ BOOST_AUTO_TEST_CASE( PredGet_test )
     BOOST_MPL_ASSERT(( not_<PredGet<const char*, char*>> ));
 }
 
+#ifndef _MSC_VER
 BOOST_AUTO_TEST_CASE( Choose )
 {
     BOOST_MPL_ASSERT((std::is_same<
@@ -92,6 +93,7 @@ BOOST_AUTO_TEST_CASE( Choose )
                         Number
                       >));
 }
+#endif
 
 static int cfunction(lua_State* st) {
     return 1;
