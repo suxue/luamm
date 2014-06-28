@@ -88,11 +88,13 @@ public:
 
 class AutoCleanVariant : public Variant<lua_State*, int> {
 public:
-    AutoCleanVariant(lua_State*st, int i) : Variant<lua_State*,int>(st,i) {}
+    typedef Variant<lua_State*, int> Base;
+    AutoCleanVariant(lua_State* st, int i) : Base(st,i) {}
 
     template<typename T>
     operator T() const {
-        T o = Variant<lua_State*, int>::operator T();
+        auto p = static_cast<Base*>(this);
+        T o = p->operator T();
         if (lua_gettop(state) == index && !StackVariable<T>::value) {
             lua_pop(state, 1);
         }

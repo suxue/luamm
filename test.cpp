@@ -212,7 +212,8 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     {
         Table math = lua["math"];
         Closure log = math["log"];
-        BOOST_CHECK_EQUAL(Number(log(100)), std::log(100));
+        Number res = log(100);
+        BOOST_CHECK_EQUAL(res, std::log(100));
     }
     BOOST_CHECK_EQUAL(lua.top(), 3);
 
