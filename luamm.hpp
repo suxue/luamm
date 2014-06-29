@@ -39,8 +39,12 @@ struct RuntimeError : std::runtime_error {
 template<typename T>
 struct VarPusher;
 
+template<typename Container, typename Key, typename Elem>
+struct KeyGetter;
+template<typename Container, typename Key, typename Elem>
+struct KeySetter;
 template<typename Container, typename Key>
-struct Accessor;
+struct KeyTyper;
 
 class AutoVariant;
 template<typename Container, typename Key, typename KeyStore = Key>
@@ -55,7 +59,7 @@ public:
 
     template<typename T>
     T to() const {
-        return Accessor<Container, KeyStore>::template get<T>(state, index);
+        return KeyGetter<Container, KeyStore, T>::get(state, index);
     }
 
     template<typename T>
@@ -65,7 +69,7 @@ public:
 
     template<typename T>
     Variant& operator=(const T& var) {
-        Accessor<Container, KeyStore>::template set<T>(state, index, var);
+        KeySetter<Container, KeyStore, T>::set(state, index, var);
         return *this;
     }
 
@@ -75,7 +79,7 @@ public:
     }
 
     int type() {
-        return Accessor<Container, KeyStore>::type(state, index);
+        return KeyTyper<Container, KeyStore>::type(state, index);
     }
 
     bool isnum() { return type() == LUA_TNUMBER; }
@@ -90,7 +94,7 @@ public:
 
     bool iscfun() {
         try {
-            Accessor<Container, KeyStore>::template get<CFunction>(state, index);
+            KeyGetter<Container, KeyStore, CFunction>::get(state, index);
         } catch (RuntimeError e) {
             return false;
         }
@@ -595,13 +599,9 @@ struct VarGetter {
     }
 };
 
-template<typename Container, typename Key>
-struct Accessor;
 
-
-template<>
-struct Accessor<Closure*, int> {
-    template<typename Var>
+template<typename Var>
+struct KeyGetter<Closure*, int, Var> {
     static Var get(Closure* cl, int key) {
         auto p = lua_getupvalue(cl->state, cl->index, key);
         if (!p) { throw VarGetError(); }
@@ -609,15 +609,20 @@ struct Accessor<Closure*, int> {
         AutoPopper ap(cl->state, 1 - StackVariable<Var>::value);
         return VarGetter<Var>::get(cl->state, -1, gd.status);
     }
+};
 
+template<>
+struct KeyTyper<Closure*, int> {
     static int type(Closure* cl, int key) {
         auto p = lua_getupvalue(cl->state, cl->index, key);
         if (!p) { throw VarGetError(); }
         AutoPopper ap(cl->state);
         return lua_type(cl->state, -1);
     }
+};
 
-    template<typename Var>
+template<typename Var>
+struct KeySetter<Closure*, int, Var> {
     static void set(Closure* cl, int key, const Var& nv) {
         {
             Guard<VarPushError> gd;
@@ -632,15 +637,16 @@ struct Accessor<Closure*, int> {
 };
 
 // stack + position
-template<>
-struct Accessor<lua_State*, int> {
-    template<typename Var>
+template<typename Var>
+struct KeyGetter<lua_State*, int, Var> {
     static Var get(lua_State* container, int key) {
         Guard<VarGetError> gd;
         return VarGetter<Var>::get(container, key, gd.status);
     }
+};
 
-    template<typename Var>
+template<typename Var>
+struct KeySetter<lua_State*, int, Var> {
     static void set(lua_State* container, int key, const Var& nv) {
         {
             Guard<VarPushError> gd;
@@ -648,8 +654,11 @@ struct Accessor<lua_State*, int> {
         }
         AutoPopper ap(container);
         lua_copy(container, -1, key);
-    };
+    }
+};
 
+template<>
+struct KeyTyper<lua_State*, int> {
     static int type(lua_State* st, int i) {
         return lua_type(st, i);
     }
@@ -660,23 +669,27 @@ struct Accessor<lua_State*, int> {
 // that if not on top, do noting
 
 // global variable key
-template<>
-struct Accessor<lua_State*, std::string> {
-    template<typename Var>
+template<typename Var>
+struct KeyGetter<lua_State*, std::string, Var> {
     static Var get(lua_State* container, const std::string& key) {
         lua_getglobal(container, key.c_str());
         Guard<VarGetError> gd;
         AutoPopper ap(container, 1 - StackVariable<Var>::value);
         return VarGetter<Var>::get(container, -1, gd.status);
     }
+};
 
+template<>
+struct KeyTyper<lua_State*, std::string> {
     static int type(lua_State* st, const std::string& k) {
         lua_getglobal(st, k.c_str());
         AutoPopper ap(st);
         return lua_type(st, -1);
     }
+};
 
-    template<typename Var>
+template<typename Var>
+struct KeySetter<lua_State*, std::string, Var> {
     static void set(lua_State* container, const std::string& key, const Var& nv) {
         {
             Guard<VarPushError> gd;
@@ -688,8 +701,7 @@ struct Accessor<lua_State*, std::string> {
 
 
 template<typename Key>
-struct Accessor<Table*, Key> {
-
+struct KeyTyper<Table*, Key> {
     static int type(Table *t, const Key& k) {
         {
             Guard<VarPushError> gd;
@@ -699,8 +711,10 @@ struct Accessor<Table*, Key> {
         AutoPopper ap(t->state);
         return lua_type(t->state, -1);
     }
+};
 
-    template<typename Var>
+template<typename Key, typename Var>
+struct KeyGetter<Table*, Key, Var> {
     static Var get(Table* container, const Key& key) {
         {
             // push key
@@ -716,8 +730,10 @@ struct Accessor<Table*, Key> {
         AutoPopper ap(container->state, 1 - StackVariable<Var>::value);
         return VarGetter<Var>::get(container->state, -1, gd.status);
     }
+};
 
-    template<typename Var>
+template<typename Key, typename Var>
+struct KeySetter<Table*, Key, Var> {
     static void set(Table *container, const Key& key, const Var& nv) {
         {
             // push key
