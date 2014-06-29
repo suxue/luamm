@@ -42,24 +42,36 @@ struct VarPusher;
 template<typename Container, typename Key>
 struct Accessor;
 
+class AutoVariant;
 template<typename Container, typename Key, typename KeyStore = Key>
 class Variant  {
-protected:
+    friend AutoVariant;
+private:
     KeyStore index;
     Container state;
 public:
     Variant(Container st, const Key& i)
-        : index(i), state(st) {}
+        : index(i), state(st)  {}
+
+    template<typename T>
+    T to() const {
+        return Accessor<Container, KeyStore>::template get<T>(state, index);
+    }
 
     template<typename T>
     operator T() const  {
-        return Accessor<Container, KeyStore>::template get<T>(state, index);
+        return to<T>();
     }
 
     template<typename T>
     Variant& operator=(const T& var) {
         Accessor<Container, KeyStore>::template set<T>(state, index, var);
         return *this;
+    }
+
+    template<typename T>
+    T convert(T* ) {
+        return this->operator T();
     }
 
     int type() {
@@ -86,15 +98,17 @@ public:
     }
 };
 
-class AutoCleanVariant : public Variant<lua_State*, int> {
+class AutoVariant {
+    Variant<lua_State*, int> variant;
 public:
-    AutoCleanVariant(lua_State*st, int i) : Variant<lua_State*,int>(st,i) {}
+    AutoVariant(lua_State* st, int i) : variant(st, i) {}
 
     template<typename T>
-    operator T() const {
-        T o = Variant<lua_State*, int>::operator T();
-        if (lua_gettop(state) == index && !StackVariable<T>::value) {
-            lua_pop(state, 1);
+    operator T() const  {
+        T o = variant.to<T>();
+        if (lua_gettop(variant.state) == variant.index &&
+                !StackVariable<T>::value) {
+            lua_pop(variant.state, 1);
         }
         return o;
     }
@@ -413,7 +427,7 @@ struct Closure : public HasMetaTable<Closure> {
                 void,
                 typename std::conditional<rvals == 1,
                     // true => auto cleanable variant
-                    AutoCleanVariant,
+                    AutoVariant,
                     std::array<Variant<lua_State*, int, int>, rvals>
                 >::type
             >::type type;
