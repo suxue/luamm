@@ -44,6 +44,7 @@ struct Accessor;
 
 template<typename Container, typename Key, typename KeyStore = Key>
 class Variant  {
+protected:
     KeyStore index;
     Container state;
 public:
