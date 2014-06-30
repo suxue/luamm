@@ -10,3 +10,6 @@ AM_LDFLAGS = $(BOOST_UNIT_TEST_FRAMEWORK_LDFLAGS)
 LIBS = -lboost_test_exec_monitor -llua
 
 luamm_test_SOURCES = test.cpp luamm.hpp
+
+test: luamm_test
+	./luamm_test
