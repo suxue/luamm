@@ -108,6 +108,14 @@ class AutoVariant {
 public:
     AutoVariant(lua_State* st, int i) : variant(st, i) {}
 
+    AutoVariant(AutoVariant&& o) : variant(std::move(o.variant)) {}
+    AutoVariant& operator=(AutoVariant&& o) {
+        variant = std::move(o.variant);
+        return *this;
+    }
+
+    int type() { return variant.type(); }
+
     template<typename T>
     operator T() const  {
         T o = variant.to<T>();
@@ -433,7 +441,7 @@ struct Closure : public HasMetaTable<Closure> {
                 typename std::conditional<rvals == 1,
                     // true => auto cleanable variant
                     AutoVariant,
-                    std::array<Variant<lua_State*, int, int>, rvals>
+                    std::array<AutoVariant, rvals>
                 >::type
             >::type type;
     };
@@ -491,7 +499,13 @@ inline typename Closure::Rvals<1>::type Closure::__return__<1>() {
     // auto cleanable variant
     return Closure::Rvals<1>::type(state, lua_gettop(state));
 }
-// TODO multiple return values
+
+template<>
+inline typename Closure::Rvals<2>::type Closure::__return__<2>() {
+    std::array<AutoVariant, 2> ret = {{
+        AutoVariant(state, -2), AutoVariant(state, -1)}};
+    return ret;
+}
 
 template<>
 struct StackVariable<Closure> {
