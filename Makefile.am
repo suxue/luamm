@@ -1,5 +1,14 @@
 ACLOCAL_AMFLAGS = -I ../m4
 
+if BUILD_DEMOS
+SUBDIRS = demos/
+demo_test:
+	$(MAKE) -C demos test
+else
+demo_test:
+	true
+endif
+
 bin_PROGRAMS = luamm_test
 #luamm_test_CPPFLAGS = $(BOOST_CPPFLAGS)
 #luamm_test_LDFLAGS = $(BOOST_THREAD_LDFLAGS)
@@ -11,5 +20,5 @@ LIBS = -lboost_test_exec_monitor -llua
 
 luamm_test_SOURCES = test.cpp luamm.hpp
 
-test: luamm_test
+test: luamm_test demo_test
 	./luamm_test

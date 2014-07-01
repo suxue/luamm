@@ -9,7 +9,8 @@ AC_LANG([C++])
 AC_PROG_CXX
 AX_CXX_COMPILE_STDCXX_11
 AM_PROG_AR
-AC_PROG_RANLIB
+
+LT_INIT
 
 AC_LANG_PUSH([C])
 AC_CHECK_HEADERS([lua.h luaconf.h], [],
@@ -22,5 +23,12 @@ AC_CHECK_HEADERS([lua.hpp],
 AC_CHECK_HEADERS([boost/preprocessor.hpp],
                  [], [AC_MSG_ERROR(You need boost PP header.)])
 
-AC_CONFIG_FILES([Makefile])
+
+AC_ARG_ENABLE([demos],
+  AS_HELP_STRING([--disable-demos], [disable building demos]),
+  [build_demos=${enableval}],
+  [build_demos=yes])
+
+AM_CONDITIONAL([BUILD_DEMOS], [test "$build_demos" = yes])
+AC_CONFIG_FILES([Makefile demos/Makefile])
 AC_OUTPUT
