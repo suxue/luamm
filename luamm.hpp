@@ -4,7 +4,6 @@
 #include <lua.hpp>
 #include <assert.h>
 
-#include <array>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -404,6 +403,17 @@ struct PassingConvention<Table> {
 };
 
 
+template<int I, typename Arg,  typename... Args>
+struct GenTuple  {
+    typedef typename GenTuple<I-1, Arg, Args..., Arg>::type type;
+};
+
+template<typename Arg,  typename... Args>
+struct GenTuple<0, Arg, Args...> {
+    typedef std::tuple<Args...> type;
+};
+
+
 struct Closure : public HasMetaTable<Closure> {
     lua_State* state;
     int index;
@@ -424,7 +434,7 @@ struct Closure : public HasMetaTable<Closure> {
                 typename std::conditional<rvals == 1,
                     // true => auto cleanable variant
                     AutoVariant,
-                    std::array<AutoVariant, rvals>
+                    typename GenTuple<rvals, Variant<lua_State*,int>>::type
                 >::type
             >::type type;
     };
@@ -487,14 +497,13 @@ inline typename Closure::Rvals<1>::type Closure::__return__<1>() {
 #define LUAMM_MAX_RETVALUES 15
 #endif
 
-#define LUAMM_X(n) AutoVariant(state, -n)BOOST_PP_COMMA_IF(BOOST_PP_SUB(n,1))
+#define LUAMM_X(n) Variant<lua_State*, int>(state, -n)BOOST_PP_COMMA_IF(BOOST_PP_SUB(n,1))
 #define LUAMM_Y(a, b, c) LUAMM_X(BOOST_PP_SUB(c, b))
 #define LUAMM_ARGS(n) BOOST_PP_REPEAT(n, LUAMM_Y, n)
 #define LUAMM_TMPL(_a, n, _b) template<>\
     inline typename Closure::Rvals<n>::type Closure::__return__<n>() {\
-        std::array<AutoVariant, n> ret = {{\
-            LUAMM_ARGS(n)}};\
-        return ret;}
+        return std::make_tuple(LUAMM_ARGS(n)); \
+    }
 BOOST_PP_REPEAT_FROM_TO(2, LUAMM_MAX_RETVALUES, LUAMM_TMPL,)
 #undef LUAMM_X
 #undef LUAMM_Y
@@ -1120,7 +1129,6 @@ BOOST_PP_REPEAT_FROM_TO(2, LUAMM_LAMBDA_PARANUMBER, LUAMM_TEMPL,)
 #undef LUAMM_ARG
 #undef LUAMM_TEMPL
 #undef LUAMM_LAMBDA_PARANUMBER
-
 
 
 typedef std::function<int(lua_State*)> lua_Lambda;
