@@ -3,6 +3,8 @@ AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_MACRO_DIR(../m4)
 
 
+MY_COMMON
+
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AM_SILENT_RULES([yes])
 AM_MAINTAINER_MODE([enable])
@@ -35,6 +37,5 @@ AC_ARG_ENABLE([demos],
   [build_demos=${enableval}],
   [build_demos=yes])
 
-AM_CONDITIONAL([BUILD_DEMOS], [test "$build_demos" = yes])
 AC_CONFIG_FILES([Makefile demos/Makefile])
 AC_OUTPUT
