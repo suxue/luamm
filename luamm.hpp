@@ -868,12 +868,6 @@ public:
     bool onstack(int index) {
         return index > LUAI_FIRSTPSEUDOIDX;
     }
-
-    void collapse() {
-        while (this->operator[](-1).type() == LUA_TNIL) {
-            pop();
-        }
-    }
 };
 
 inline State::State(const State& o) : ptr_(o.ptr_) {}
@@ -907,13 +901,8 @@ inline Table::Table(lua_State* st, int i)
 }
 
 inline void cleanup(lua_State* state, int index) {
-    if (state) {
-        State st(state);
-        if (st.onstack(index)) {
-            lua_pushnil(state);
-            lua_replace(state, index);
-        }
-        st.collapse();
+    if (state && index == lua_gettop(state)) {
+        lua_pop(state, 1);
     }
 }
 
