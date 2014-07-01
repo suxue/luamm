@@ -33,6 +33,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <functional>
+#include <tuple>
 
 using namespace luamm;
 using namespace std;
@@ -261,6 +262,18 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         });
         cl.call<0>("hello", 12);
         BOOST_CHECK_EQUAL(Number(lua["hello"]), 12);
+    }
+    BOOST_CHECK_EQUAL(lua.top(), 3);
+
+    { // simple multiple return
+        Closure cl = lua.newCallable([](State st, Number a, Number b) {
+            return make_tuple(b, a);
+        });
+        lua["test"] = cl;
+        Closure recv = lua.newFunc(
+                "local a, b = test(11, 12); return tostring(a)");
+        Number ret  = recv();
+        BOOST_CHECK_EQUAL(ret, 12);
     }
     BOOST_CHECK_EQUAL(lua.top(), 3);
 

@@ -7,6 +7,7 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <type_traits>
 
 #include <boost/function_types/parameter_types.hpp>
@@ -973,15 +974,7 @@ struct TypeChecker {
 
 template<typename T>
 struct IsSingleReturnValue {
-
-    template<typename C>
-    static char test(typename std::add_pointer<
-            typename VarPusher<C>::type>::type);
-
-    template<typename C>
-    static double test(...);
-
-    enum { value = sizeof(test<T>(nullptr)) == 1 };
+    enum { value = !std::is_same<typename VarPusher<T>::type, PlaceHolder>::value };
 };
 
 template<typename T>
@@ -992,9 +985,25 @@ struct SingleReturn {
     enum { value = 1 };
 };
 
+template<typename Tuple, int n>
+struct MultiReturnUnpack {
+    static void unpack(State& st, Tuple&& ret) {
+        st[n+1] = std::move(std::get<n>(ret));
+        MultiReturnUnpack<Tuple, n-1>::unpack(st, std::forward<Tuple>(ret));
+    }
+};
+
+template<typename Tuple>
+struct MultiReturnUnpack<Tuple, -1> {
+    static void unpack(State& st, Tuple&& ret) {}
+};
+
 template<typename T>
 struct MultiReturn {
-    // TODO
+    enum { value = std::tuple_size<T>::value };
+    static void collect(State& st, T&& ret) {
+        MultiReturnUnpack<T, value - 1>::unpack(st, std::forward<T>(ret));
+    }
 };
 
 template<typename T>
@@ -1048,7 +1057,7 @@ struct CallableCall {
         }
     };
 
-    typedef typename std::conditional<RetType::value,
+    typedef typename std::conditional<RetType::value != 0,
             HasRet, NoRet>::type Ret;
 
 
