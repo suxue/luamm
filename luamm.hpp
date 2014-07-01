@@ -2,6 +2,7 @@
 #define LUAMM_HPP
 
 #include <lua.hpp>
+#include <assert.h>
 
 #include <array>
 #include <functional>
@@ -117,14 +118,7 @@ public:
     int type() { return variant.type(); }
 
     template<typename T>
-    operator T() const  {
-        T o = variant.to<T>();
-        if (lua_gettop(variant.state) == variant.index &&
-                !StackVariable<T>::value) {
-            lua_pop(variant.state, 1);
-        }
-        return o;
-    }
+    operator T() const;
 };
 
 
@@ -417,18 +411,7 @@ struct Closure : public HasMetaTable<Closure> {
     Variant<Closure*, int>  operator[](int n) {
         return Variant<Closure*, int>(this, n);
     }
-    ~Closure() {
-        if (state) {
-            if (lua_gettop(state) == index) {
-                lua_pop(state, 1);
-            }
-            //} else {
-                //throw RuntimeError(
-                    //std::string("cannot clean up stack variable (closure)")
-                        //+ std::to_string(index));
-            //}
-        }
-    }
+    ~Closure();
     Closure(Closure&& o) : state(o.state), index(o.index) {
         o.state = nullptr;
         o.index = 0;
@@ -770,6 +753,18 @@ protected:
     lua_State *ptr_;
 public:
 
+    class Scope {
+        State *state;
+        int origtop;
+    public:
+        Scope(State* st) : state(st), origtop(st->top()) {}
+        ~Scope() { state->settop(origtop); }
+    };
+
+    Scope newScope() {
+        return Scope(this);
+    }
+
     State(lua_State *p);
     lua_State* ptr();
 
@@ -869,6 +864,16 @@ public:
     void settop(int i) {
         lua_settop(ptr(), i);
     }
+
+    bool onstack(int index) {
+        return index > LUAI_FIRSTPSEUDOIDX;
+    }
+
+    void collapse() {
+        while (this->operator[](-1).type() == LUA_TNIL) {
+            pop();
+        }
+    }
 };
 
 inline State::State(const State& o) : ptr_(o.ptr_) {}
@@ -896,32 +901,42 @@ inline NewState::~NewState() {
 }
 
 inline Table::Table(lua_State* st, int i)
-    : state(st), index(lua_absindex(st,i)) {}
+    : state(st), index(lua_absindex(st,i)) {
+    assert(state);
+    assert(index);
+}
 
-inline Table::~Table() {
+inline void cleanup(lua_State* state, int index) {
     if (state) {
-        if (lua_gettop(state) == index) {
-            lua_pop(state, 1);
+        State st(state);
+        if (st.onstack(index)) {
+            lua_pushnil(state);
+            lua_replace(state, index);
         }
-        //} else {
-            //throw RuntimeError(
-                //std::string("cannot clean up stack variable (table)")
-                    //+ std::to_string(index));
-        //}
+        st.collapse();
     }
 }
 
-inline UserData::~UserData() {
-    if (state) {
-        if (lua_gettop(state) == index) {
-            lua_pop(state, 1);
-        }
-        //else {
-            //throw RuntimeError(
-                //std::string("cannot clean up stack variable (userdata)")
-                    //+ std::to_string(index));
-        //}
+template<typename T>
+AutoVariant::operator T() const {
+    T o = variant.to<T>();
+    if (lua_gettop(variant.state) == variant.index &&
+            !StackVariable<T>::value) {
+        lua_pop(variant.state, 1);
     }
+    return o;
+}
+
+inline Table::~Table() {
+    cleanup(state, index);
+}
+
+inline UserData::~UserData() {
+    cleanup(state, index);
+}
+
+inline Closure::~Closure() {
+    cleanup(state, index);
 }
 
 template<typename T>
@@ -1144,7 +1159,7 @@ Closure State::newCallable(F func)
 
         // shift +1 to allocate slot for return value
         for (auto i = 1; i <= rets; i++) {
-            lua_pushnil(st);
+            lua_pushboolean(st, 1);
             lua_insert(st, i);
         }
 

@@ -278,18 +278,21 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     BOOST_CHECK_EQUAL(lua.top(), 3);
 
     { // simple multiple return
+        auto scope = lua.newScope();
+
         Closure cl = lua.newCallable([](State st, Number a, Number b) {
             return make_tuple(b, a);
         });
+
         auto ret = cl.call<2>(11, 12);
+
         BOOST_CHECK_EQUAL(lua.top(), 6);
         Number a = get<0>(ret);
         Number b = get<1>(ret);
         BOOST_CHECK_EQUAL(a, 12);
         BOOST_CHECK_EQUAL(b, 11);
-        // TODO, collapse the top stack
-        lua.settop(3);
     }
+
     BOOST_CHECK_EQUAL(lua.top(), 3);
 
     {
