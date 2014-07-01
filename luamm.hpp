@@ -483,12 +483,23 @@ inline typename Closure::Rvals<1>::type Closure::__return__<1>() {
     return Closure::Rvals<1>::type(state, lua_gettop(state));
 }
 
-template<>
-inline typename Closure::Rvals<2>::type Closure::__return__<2>() {
-    std::array<AutoVariant, 2> ret = {{
-        AutoVariant(state, -2), AutoVariant(state, -1)}};
-    return ret;
-}
+#ifndef LUAMM_MAX_RETVALUES
+#define LUAMM_MAX_RETVALUES 15
+#endif
+
+#define LUAMM_X(n) AutoVariant(state, -n)BOOST_PP_COMMA_IF(BOOST_PP_SUB(n,1))
+#define LUAMM_Y(a, b, c) LUAMM_X(BOOST_PP_SUB(c, b))
+#define LUAMM_ARGS(n) BOOST_PP_REPEAT(n, LUAMM_Y, n)
+#define LUAMM_TMPL(_a, n, _b) template<>\
+    inline typename Closure::Rvals<n>::type Closure::__return__<n>() {\
+        std::array<AutoVariant, n> ret = {{\
+            LUAMM_ARGS(n)}};\
+        return ret;}
+BOOST_PP_REPEAT_FROM_TO(2, LUAMM_MAX_RETVALUES, LUAMM_TMPL,)
+#undef LUAMM_X
+#undef LUAMM_Y
+#undef LUAMM_ARGS
+#undef LUAMM_TMPL
 
 template<>
 struct StackVariable<Closure> {

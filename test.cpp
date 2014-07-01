@@ -307,7 +307,20 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         Number num = cl(in);
         BOOST_CHECK_EQUAL(num, 25);
     }
-    BOOST_CHECK_EQUAL(lua.top(), 3);
 
+    {
+        auto scope = lua.newScope();
+        Closure cl = lua.newFunc("return 1, 2, 3, 5, 8, 13;");
+        auto ret = cl.call<6>();
+        int sum = 0;
+        sum += Number(get<0>(ret));
+        sum += Number(get<1>(ret));
+        sum += Number(get<2>(ret));
+        sum += Number(get<3>(ret));
+        sum += Number(get<4>(ret));
+        sum += Number(get<5>(ret));
+        BOOST_CHECK_EQUAL(sum, 32);
+    }
+    BOOST_CHECK_EQUAL(lua.top(), 3);
 }
 
