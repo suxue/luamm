@@ -2,7 +2,7 @@ AC_INIT([luamm], [0.1 foreign])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_MACRO_DIR(../m4)
 
-AM_INIT_AUTOMAKE([1.14 no-define foreign])
+AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AM_SILENT_RULES([yes])
 AM_MAINTAINER_MODE([enable])
 AC_LANG([C++])

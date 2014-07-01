@@ -4,6 +4,9 @@ lib_LTLIBRARIES  = hello.la
 hello_la_SOURCES = hellomod.cpp
 hello_la_LDFLAGS = -llua -module -avoid-version -shared
 
-test:  .libs/hello.so
-	cp .libs/hello.so .
+test:  hello.la
+	@cp .libs/hello.so .
+	@echo
+	@echo "TEST through lua c module..."
 	lua $(srcdir)/hellomod.lua
+	@echo
