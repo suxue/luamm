@@ -579,9 +579,9 @@ struct VarPusher {
                  typename SelectImpl<PredPush, T>::type,
                  T
             >::type type;
-    static_assert( ! std::is_same<PlaceHolder, type>::value,
-            "no push() implmentation can be selected for T" );
     static bool push(lua_State* st, const T& v) {
+        static_assert( ! std::is_same<PlaceHolder, type>::value,
+                "no push() implmentation can be selected for T" );
         return VarBase(st).to<type>().push(v);
     }
 };
@@ -592,9 +592,9 @@ struct VarGetter {
                  typename SelectImpl<PredGet, T>::type,
                  T
             >::type type;
-    static_assert( ! std::is_same<PlaceHolder, type>::value,
-            "no get() implmentation can be selected for T" );
     static T get(lua_State* st, int index, bool& success) {
+        static_assert( ! std::is_same<PlaceHolder, type>::value,
+                "no get() implmentation can be selected for T" );
         return VarBase(st).to<type>().get(index, success);
     }
 };
@@ -972,10 +972,39 @@ struct TypeChecker {
 };
 
 template<typename T>
-struct ReturnValue {
-    enum { value = 1 };
+struct IsSingleReturnValue {
+
+    template<typename C>
+    static char test(typename std::add_pointer<
+            typename VarPusher<C>::type>::type);
+
+    template<typename C>
+    static double test(...);
+
+    enum { value = sizeof(test<T>(nullptr)) == 1 };
+};
+
+template<typename T>
+struct SingleReturn {
     static void collect(State& st, T&& ret) {
         st[1] = ret;
+    }
+    enum { value = 1 };
+};
+
+template<typename T>
+struct MultiReturn {
+    // TODO
+};
+
+template<typename T>
+struct ReturnValue {
+    typedef typename std::conditional<IsSingleReturnValue<T>::value,
+        SingleReturn<T>,
+        MultiReturn<T>>::type type;
+    enum { value = type::value };
+    static void collect(State& st, T&& ret) {
+        type::collect(st, std::forward<T>(ret));
     }
 };
 
@@ -987,6 +1016,7 @@ struct ReturnValue<void> {
 template<typename TL>
 struct TypeChecker<TL, 0> {
     static void check(State& st, int offset) {} };
+
 
 template<typename C>
 struct CallableCall {
