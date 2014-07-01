@@ -960,9 +960,9 @@ struct TypeChecker {
     typedef typename boost::mpl::at_c<TL, n>::type Elem;
     typedef VarProxy<typename VarGetter<Elem>::type> Getter;
     static_assert(Getter::tid >= 0, "not a valid type");
-    static void check(State& st) {
-        TypeChecker<TL, n-1>::check(st);
-        int rtid = st[n+1].type();
+    static void check(State& st, int offset) {
+        TypeChecker<TL, n-1>::check(st, offset);
+        int rtid = st[n+offset].type();
         if (rtid != Getter::tid) {
             st.error(std::string("bad argument#") + std::to_string(n) + " ("
                      + st.typerepr(Getter::tid) + " expected, got " +
@@ -971,8 +971,22 @@ struct TypeChecker {
     }
 };
 
+template<typename T>
+struct ReturnValue {
+    enum { value = 1 };
+    static void collect(State& st, T&& ret) {
+        st[1] = ret;
+    }
+};
+
+template<>
+struct ReturnValue<void> {
+    enum { value = 0 };
+};
+
 template<typename TL>
-struct TypeChecker<TL, 0> { static void check(State& st) {} };
+struct TypeChecker<TL, 0> {
+    static void check(State& st, int offset) {} };
 
 template<typename C>
 struct CallableCall {
@@ -984,32 +998,52 @@ struct CallableCall {
     typedef typename boost::function_types::result_type<
         decltype(&lambda_t::operator())>::type result_t;
 
+    typedef ReturnValue<result_t> RetType;
+
     // paramter list, include the leading State
     typedef typename boost::mpl::pop_front<fullpara_t>::type para_t;
 
     typedef boost::mpl::size<para_t> nargs_t;
 
-    static result_t call(C c, lua_State* st) {
+    struct NoRet {
+        static void call(C& c, State& st) {
+            CallLambda<C, nargs_t::value>::call(c, st, RetType::value);
+        }
+    };
+
+    struct HasRet {
+        static void call(C& c, State& st) {
+            RetType::collect(st,
+                CallLambda<C, nargs_t::value>::call(c, st, RetType::value));
+        }
+    };
+
+    typedef typename std::conditional<RetType::value,
+            HasRet, NoRet>::type Ret;
+
+
+    static void call(C c, lua_State* st) {
         State state(st);
         // type checking
-        TypeChecker<para_t, boost::mpl::size<para_t>::value - 1>::check(state);
-        return CallLambda<C, nargs_t::value>::call(c, state);
+        TypeChecker<para_t, boost::mpl::size<para_t>::value - 1>
+            ::check(state, RetType::value);
+        Ret::call(c, state);
     }
 };
 
 template<typename C>struct  CallLambda<C, 1> {
-    static typename CallableCall<C>::result_t call(C& func, State& st) {
+    static typename CallableCall<C>::result_t call(C& func, State& st, int offset) {
         return func(st);
     }}; // special case, c function has no argument
 
 #ifndef LUAMM_LAMBDA_PARANUMBER
 #define LUAMM_LAMBDA_PARANUMBER 15
 #endif
-#define LUAMM_ARGPACK(n) st[n]
+#define LUAMM_ARGPACK(n) st[n + offset - 1]
 #define LUAMM_ARGLIST(z, n, _) LUAMM_ARGPACK(BOOST_PP_ADD(n, 2)),
 #define LUAMM_ARG(n) BOOST_PP_REPEAT(BOOST_PP_SUB(n, 1), LUAMM_ARGLIST, ) LUAMM_ARGPACK(BOOST_PP_INC(n))
 #define LUAMM_TEMPL(_a, n, _b) template<typename C>struct CallLambda<C, n> {\
-    static typename CallableCall<C>::result_t call(C& func, State& st) {\
+    static typename CallableCall<C>::result_t call(C& func, State& st, int offset) {\
         return func(st, LUAMM_ARG(BOOST_PP_SUB(n,1))); }};
 
 BOOST_PP_REPEAT_FROM_TO(2, LUAMM_LAMBDA_PARANUMBER, LUAMM_TEMPL,)
@@ -1018,6 +1052,7 @@ BOOST_PP_REPEAT_FROM_TO(2, LUAMM_LAMBDA_PARANUMBER, LUAMM_TEMPL,)
 #undef LUAMM_ARG
 #undef LUAMM_TEMPL
 #undef LUAMM_LAMBDA_PARANUMBER
+
 
 
 typedef std::function<int(lua_State*)> lua_Lambda;
@@ -1047,19 +1082,24 @@ namespace {
 template<typename F>
 Closure State::newCallable(F func)
 {
+    typedef ReturnValue<typename CallableCall<F>::result_t> RetType;
     lua_Lambda lambda = [func](lua_State* st) -> int {
         // allocate a slot for return value
         State lua(st);
 
-        // shift +1 to allocate slot for return value
-        lua_pushnil(st);
-        lua_insert(st, 1);
+        const int rets = RetType::value;
 
-        lua[1] = CallableCall<F>::call(func, st);
+        // shift +1 to allocate slot for return value
+        for (auto i = 1; i <= rets; i++) {
+            lua_pushnil(st);
+            lua_insert(st, i);
+        }
+
+        CallableCall<F>::call(func, st);
 
         // leave return value one the stack, wipe out other things
-        lua_settop(st, 1);
-        return 1;
+        lua_settop(st, rets);
+        return rets;
     };
 
     push(CClosure(&helper::luamm_cclosure, 1));

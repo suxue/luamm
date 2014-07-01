@@ -255,6 +255,15 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     }
     BOOST_CHECK_EQUAL(lua.top(), 3);
 
+    { // return void
+        Closure cl = lua.newCallable([](State st, string&& key, Number num) {
+            st[key] = num;
+        });
+        cl.call<0>("hello", 12);
+        BOOST_CHECK_EQUAL(Number(lua["hello"]), 12);
+    }
+    BOOST_CHECK_EQUAL(lua.top(), 3);
+
     {
         Closure cl = lua.newCallable([](State& st, Table&& pair) -> Number {
             return Number(pair["num1"]) + Number(pair["num2"]);
