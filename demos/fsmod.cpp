@@ -196,8 +196,7 @@ namespace metatable {
 
                 st.push(f);
                 st.push(isreverse);
-                st.push(Nil());
-                return 3;
+                return 2;
             }));
             Closure each = st[-1];
             mtab["each"] = each;
