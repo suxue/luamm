@@ -864,7 +864,7 @@ public:
     }
 
     template<typename F>
-    Closure newCallable(F func);
+    Closure newCallable(F func, int extra_upvalues = 0);
 
     State(const State& o);
 
@@ -1165,7 +1165,7 @@ namespace {
 }
 
 template<typename F>
-Closure State::newCallable(F func)
+Closure State::newCallable(F func, int extra_upvalues)
 {
     typedef ReturnValue<typename CallableCall<F>::result_t> RetType;
     lua_Lambda lambda = [func](lua_State* st) -> int {
@@ -1187,7 +1187,7 @@ Closure State::newCallable(F func)
         return rets;
     };
 
-    push(CClosure(&helper::luamm_cclosure, 1));
+    push(CClosure(&helper::luamm_cclosure, 1 + extra_upvalues));
     Closure cl = this->operator[](-1);
     UserData ud = newUserData<lua_Lambda>(lambda);
 
