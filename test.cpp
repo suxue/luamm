@@ -190,7 +190,7 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     {
         Table math = lua["math"];
         UserData ud = math["userdata"];
-        BOOST_CHECK_EQUAL(*ud.to<double>(), 100);
+        BOOST_CHECK_EQUAL(ud.to<double>(), 100);
     }
 
     BOOST_CHECK_EQUAL(lua.top(), 3);

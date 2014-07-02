@@ -176,9 +176,9 @@ struct UserData : HasMetaTable<UserData> {
     }
 
     template<typename T>
-    T* to() {
+    T& to() {
         void *p = lua_touserdata(state, index);
-        return static_cast<T*>(p);
+        return *static_cast<T*>(p);
     }
     ~UserData();
 private:
@@ -1140,16 +1140,16 @@ namespace {
         {
             State st(_);
             UserData ud = st[st.upvalue(1)];
-            auto lambda = ud.to<lua_Lambda>();
-            return lambda->operator()(_);
+            auto& lambda = ud.to<lua_Lambda>();
+            return lambda(_);
         }
 
         static int luamm_cleanup(lua_State* _)
         {
             State st(_);
             UserData ud = st[1];
-            auto lambda = ud.to<lua_Lambda>();
-            lambda->~lua_Lambda();
+            auto& lambda = ud.to<lua_Lambda>();
+            lambda.~lua_Lambda();
             return 0;
         }
     };
