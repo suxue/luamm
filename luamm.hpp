@@ -1064,21 +1064,30 @@ template<typename TL>
 struct TypeChecker<TL, 0> {
     static void check(State& st, int offset) {} };
 
-
-template<typename C>
-struct CallableCall {
-    typedef C  lambda_t;
-    // formal parameters
+template<typename F>
+struct ToLambda {
+    typedef decltype(&F::operator()) lambda_t;
     typedef typename boost::function_types::parameter_types<
-        decltype(&lambda_t::operator())>::type fullpara_t;
-
-    typedef typename boost::function_types::result_type<
-        decltype(&lambda_t::operator())>::type result_t;
-
-    typedef ReturnValue<result_t> RetType;
+        lambda_t>::type fullpara_t;
 
     // paramter list, include the leading State
     typedef typename boost::mpl::pop_front<fullpara_t>::type para_t;
+};
+
+template<typename F>
+struct ToLambda<F*> {
+    typedef F lambda_t;
+    typedef typename boost::function_types::parameter_types<
+        lambda_t>::type para_t;
+};
+
+template<typename C>
+struct CallableCall {
+    typedef typename ToLambda<C>::para_t para_t;
+    typedef typename boost::function_types::result_type<
+        typename ToLambda<C>::lambda_t>::type result_t;
+
+    typedef ReturnValue<result_t> RetType;
 
     typedef boost::mpl::size<para_t> nargs_t;
 
