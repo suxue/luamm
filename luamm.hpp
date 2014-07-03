@@ -1180,7 +1180,11 @@ Closure State::newCallable(F func, int extra_upvalues)
             lua_insert(st, i);
         }
 
+        try {
         CallableCall<F>::call(func, st);
+        } catch (std::exception& e) {
+            lua.error(e.what());
+        }
 
         // leave return value one the stack, wipe out other things
         lua_settop(st, rets);

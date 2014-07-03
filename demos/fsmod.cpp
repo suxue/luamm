@@ -10,13 +10,34 @@ using boost::system::error_code;
 namespace fs = boost::filesystem;
 
 const char *path_registry_key = "boost_filesystem_path";
+const char *file_status_registry_key = "boost_filesystem_file_status";
 
-namespace types {
-    void make_path(State& st, UserData& path)
-    {
-        Table mtab = st.registry()[path_registry_key];
-        path.set(mtab);
-    }
+
+/*
+ * lua object instances makers
+ */
+void make_path(State& st, UserData& path)
+{
+    Table mtab = st.registry()[path_registry_key];
+    path.set(mtab);
+}
+
+UserData& make_file_status(State& st, UserData& file_status)
+{
+    Table mtab = st.registry()[file_status_registry_key];
+    file_status.set(mtab);
+    return file_status;
+}
+
+/*
+ *  operational functions
+ */
+UserData status(State& st, UserData&& path)
+{
+    fs::file_status stat = fs::status(path.to<fs::path>());
+    UserData new_stat = st.newUserData<fs::file_status>(stat);
+    make_file_status(st, new_stat);
+    return new_stat;
 }
 
 namespace metatable {
@@ -32,49 +53,49 @@ namespace metatable {
     UserData path_root_name(State& st, UserData&& path) {
         auto root_name = path.to<fs::path>().root_name();
         UserData np = st.newUserData<fs::path>(root_name);
-        types::make_path(st, np);
+        make_path(st, np);
         return np;
     }
 
     UserData path_filename(State& st, UserData&& path) {
         auto filename = path.to<fs::path>().filename();
         UserData np = st.newUserData<fs::path>(filename);
-        types::make_path(st, np);
+        make_path(st, np);
         return np;
     }
 
     UserData path_parent_path(State& st, UserData&& path) {
         auto parent_path = path.to<fs::path>().parent_path();
         UserData np = st.newUserData<fs::path>(parent_path);
-        types::make_path(st, np);
+        make_path(st, np);
         return np;
     }
 
     UserData path_relative_path(State& st, UserData&& path) {
         auto relative_path = path.to<fs::path>().relative_path();
         UserData np = st.newUserData<fs::path>(relative_path);
-        types::make_path(st, np);
+        make_path(st, np);
         return np;
     }
 
     UserData path_extension(State& st, UserData&& path) {
         auto extension = path.to<fs::path>().extension();
         UserData np = st.newUserData<fs::path>(extension);
-        types::make_path(st, np);
+        make_path(st, np);
         return np;
     }
 
     UserData path_root_path(State& st, UserData&& path) {
         auto root_path = path.to<fs::path>().root_path();
         UserData np = st.newUserData<fs::path>(root_path);
-        types::make_path(st, np);
+        make_path(st, np);
         return np;
     }
 
     UserData path_root_directory(State& st, UserData&& path) {
         auto root_directory = path.to<fs::path>().root_directory();
         UserData np = st.newUserData<fs::path>(root_directory);
-        types::make_path(st, np);
+        make_path(st, np);
         return np;
     }
 
@@ -90,7 +111,7 @@ namespace metatable {
         fs::path np = p1.to<fs::path>();
         np  += p2.to<fs::path>();
         UserData ud = st.newUserData<fs::path>(np);
-        types::make_path(st, ud);
+        make_path(st, ud);
         return ud;
     }
 
@@ -174,11 +195,11 @@ namespace metatable {
                         st.push(Nil());
                     } else if (!isreverse) {
                         UserData ret = st.newUserData<fs::path>(*p++);
-                        types::make_path(st, ret);
+                        make_path(st, ret);
                         st.push(ret);
                     } else {
                         UserData ret = st.newUserData<fs::path>(*--p);
-                        types::make_path(st, ret);
+                        make_path(st, ret);
                         st.push(ret);
                     }
 
@@ -204,26 +225,89 @@ namespace metatable {
 
         return mtab;
     }
+
+    Number file_status_type(State& st, UserData&& self)
+    {
+        return self.to<fs::file_status>().type();
+    }
+
+    Number file_status_perms(State& st, UserData&& self)
+    {
+        fs::file_status& stat = self.to<fs::file_status>();
+        if (st[-1].isnum()) { // setter
+            auto newperms = static_cast<fs::perms>(Number(st[-1]));
+            stat.permissions(newperms);
+            return newperms;
+        } else { // getter
+            return stat.permissions();
+        }
+    }
+
+    string file_status_typename(State& st, UserData&& self)
+    {
+        int id = file_status_type(st, forward<UserData>(self));
+        switch (id) {
+        case fs::file_type::status_error:
+            return "status_error";
+        case fs::file_type::file_not_found:
+            return "file_not_found";
+        case fs::file_type::regular_file:
+            return "regular";
+        case fs::file_type::directory_file:
+            return "directory";
+        case fs::file_type::symlink_file:
+            return "symlink";
+        case fs::file_type::block_file:
+            return "block";
+        case fs::file_type::character_file:
+            return "character";
+        case fs::file_type::fifo_file:
+            return "fifo";
+        case fs::file_type::socket_file:
+            return "socket";
+        case fs::file_type::type_unknown:
+        default:
+            return "unknown";
+        }
+    }
+
+    Table file_status(State& st)
+    {
+        Table mtab = st.newTable();
+        mtab["__index"] = mtab;
+        mtab["typeid"] = st.newCallable(file_status_type);
+        mtab["type"] = st.newCallable(file_status_typename);
+        mtab["perms"] = st.newCallable(file_status_perms);
+        return mtab;
+    }
 }
 
 namespace constructor {
     UserData path(State& st, const char *pathstr)
     {
         UserData new_path = st.newUserData<fs::path>(pathstr);
-        types::make_path(st, new_path);
+        make_path(st, new_path);
         return new_path;
     }
 }
 
 
+
 Table reg(State& st)
 {
+    Table tab = st.newTable();
+    {
+        tab["path"] = st.newCallable(constructor::path);
+        tab["status"] = st.newCallable(status);
+    }
     {
         Table path_mtab = metatable::path(st);
         st.registry()[path_registry_key] = path_mtab;
+        path_mtab["stat"] = Closure(tab["status"]);
+
+        Table file_status_mtab = metatable::file_status(st);
+        st.registry()[file_status_registry_key] = file_status_mtab;
     }
-    Table tab = st.newTable();
-    tab["path"] = st.newCallable(constructor::path);
 
     return tab;
 }

@@ -19,3 +19,5 @@ end
 for part in a:each(true) do
    print(part)
 end
+
+print (fs.path("/"):stat():type())
