@@ -12,137 +12,197 @@ namespace fs = boost::filesystem;
 const char *path_registry_key = "boost_filesystem_path";
 const char *file_status_registry_key = "boost_filesystem_file_status";
 
+/*
+ * Class adopters
+ */
+class Path : public UserData {
+    fs::path* path_ptr;
+    public:
+        Path(UserData&& u)
+            : UserData(forward<UserData>(u)), path_ptr(&to<fs::path>()) {
+            check(path_registry_key);
+        }
+        fs::path& data() { return *path_ptr; }
+        operator fs::path&() { return data(); }
+};
+
+class FileStatus: public UserData {
+    fs::file_status* fstat_ptr;
+    public:
+        FileStatus(UserData&& u)
+            : UserData(forward<UserData>(u)), fstat_ptr(&to<fs::file_status>()) {
+            check(file_status_registry_key);
+        }
+        fs::file_status& data() { return *fstat_ptr; }
+        operator fs::file_status&() { return data(); }
+};
 
 /*
  * lua object instances makers
  */
-void make_path(State& st, UserData& path)
+UserData& make_path(State& st, UserData& path)
 {
-    Table mtab = st.registry()[path_registry_key];
-    path.set(mtab);
+    path.set(path_registry_key);
+    return path;
 }
 
 UserData& make_file_status(State& st, UserData& file_status)
 {
-    Table mtab = st.registry()[file_status_registry_key];
-    file_status.set(mtab);
+    file_status.set(file_status_registry_key);
     return file_status;
 }
 
 /*
  *  operational functions
  */
-UserData status(State& st, UserData&& path)
+UserData status(State& st, Path&& path)
 {
-    fs::file_status stat = fs::status(path.to<fs::path>());
+    fs::file_status stat = fs::status(path);
     UserData new_stat = st.newUserData<fs::file_status>(stat);
     make_file_status(st, new_stat);
     return new_stat;
 }
 
 namespace metatable {
-    string path_tostring(State& st, UserData&& path) {
-        return path.to<fs::path>().string();
+    string path_tostring(State& st, Path&& self) {
+        return self.data().string();
     }
 
-    Closure path_index(State& st, UserData&& ud, const char *key) {
-        Table mtab = ud.get();
-        return mtab[key];
+    Closure path_index(State& st, Path&& self, const char *key) {
+        return  Table(self.get())[key];
     }
 
-    UserData path_root_name(State& st, UserData&& path) {
-        auto root_name = path.to<fs::path>().root_name();
+    UserData path_root_name(State& st, Path&& self) {
+        auto root_name = self.data().root_name();
         UserData np = st.newUserData<fs::path>(root_name);
-        make_path(st, np);
-        return np;
+        return move(make_path(st, np));
     }
 
-    UserData path_filename(State& st, UserData&& path) {
-        auto filename = path.to<fs::path>().filename();
+    UserData path_filename(State& st, Path&& self) {
+        auto filename = self.data().filename();
         UserData np = st.newUserData<fs::path>(filename);
-        make_path(st, np);
-        return np;
+        return move(make_path(st, np));
     }
 
-    UserData path_parent_path(State& st, UserData&& path) {
-        auto parent_path = path.to<fs::path>().parent_path();
+    UserData path_parent_path(State& st, Path&& self) {
+        auto parent_path = self.data().parent_path();
         UserData np = st.newUserData<fs::path>(parent_path);
-        make_path(st, np);
-        return np;
+        return move(make_path(st, np));
     }
 
-    UserData path_relative_path(State& st, UserData&& path) {
-        auto relative_path = path.to<fs::path>().relative_path();
+    UserData path_relative_path(State& st, Path&& self) {
+        auto relative_path = self.data().relative_path();
         UserData np = st.newUserData<fs::path>(relative_path);
-        make_path(st, np);
-        return np;
+        return move(make_path(st, np));
     }
 
-    UserData path_extension(State& st, UserData&& path) {
-        auto extension = path.to<fs::path>().extension();
+    UserData path_extension(State& st, Path&& self) {
+        auto extension = self.data().extension();
         UserData np = st.newUserData<fs::path>(extension);
-        make_path(st, np);
-        return np;
+        return move(make_path(st, np));
     }
 
-    UserData path_root_path(State& st, UserData&& path) {
-        auto root_path = path.to<fs::path>().root_path();
+    UserData path_root_path(State& st, Path&& self) {
+        auto root_path = self.to<fs::path>().root_path();
         UserData np = st.newUserData<fs::path>(root_path);
-        make_path(st, np);
-        return np;
+        return move(make_path(st, np));
     }
 
-    UserData path_root_directory(State& st, UserData&& path) {
-        auto root_directory = path.to<fs::path>().root_directory();
+    UserData path_root_directory(State& st, Path&& self) {
+        auto root_directory = self.data().root_directory();
         UserData np = st.newUserData<fs::path>(root_directory);
-        make_path(st, np);
-        return np;
+        return move(make_path(st, np));
     }
 
-    bool path_empty(State& st, UserData&& path) {
-        return path.to<fs::path>().empty();
+    bool path_empty(State& st, Path&& self) {
+        return self.data().empty();
     }
 
-    bool path_is_absolute(State& st, UserData&& path) {
-        return path.to<fs::path>().is_absolute();
+    bool path_is_absolute(State& st, Path&& self) {
+        return self.data().is_absolute();
     }
 
-    UserData path_concat(State& st, UserData&& p1, UserData&& p2) {
-        fs::path np = p1.to<fs::path>();
-        np  += p2.to<fs::path>();
+    UserData path_concat(State& st, Path&& p1, Path&& p2) {
+        fs::path np = p1.data();
+        np  += p2.data();
         UserData ud = st.newUserData<fs::path>(np);
-        make_path(st, ud);
-        return ud;
+        return move(make_path(st, ud));
     }
 
-    string path_native(State&, UserData&& p) {
-        return p.to<fs::path>().native();
+    string path_native(State&, Path&& self) {
+        return self.data().native();
     }
 
-    string path_generic(State&, UserData&& p) {
-        return p.to<fs::path>().generic_string();
+    string path_generic(State&, Path&& self) {
+        return self.data().generic_string();
     }
 
-    int path_compare(State&, UserData&& a, UserData&& b) {
-        return a.to<fs::path>().compare(b.to<fs::path>());
+    int path_compare(State&, Path&& a, Path&& b) {
+        return a.data().compare(b.data());
     }
 
-    bool path_equal(State& _, UserData&& a, UserData&& b) {
-        return path_compare(_,
-                forward<UserData>(a),
-                forward<UserData>(b)) == 0;
+    bool path_equal(State& _, Path&& a, Path&& b) {
+        return a.data().compare(b.data()) == 0;
     }
 
-    bool path_less(State& _, UserData&& a, UserData&& b) {
-        return path_compare(_,
-                forward<UserData>(a),
-                forward<UserData>(b)) < 0;
+    bool path_less(State& _, Path&& a, Path&& b) {
+        return a.data().compare(b.data()) < 0;
     }
 
-    bool path_le(State& _, UserData&& a, UserData&& b) {
-        return path_compare(_,
-                forward<UserData>(a),
-                forward<UserData>(b)) <= 0;
+    bool path_le(State& _, Path&& a, Path&& b) {
+        return a.data().compare(b.data()) <= 0;
+    }
+
+    int path_each(lua_State* _)
+    {
+        State st(_);
+        if (!st[1].isuserdata()) {
+            st.error("arg#1 should be a path userdata");
+        }
+
+        bool isreverse = false;
+        if (st.top() == 2 && st[2].isbool()) {
+            isreverse = st[2];
+        }
+
+        Path self = st[1];
+        auto& path = self.data();
+
+        st.push(CClosure([](lua_State* _) -> int {
+            State st(_);
+            bool isreverse = st[1];
+
+            UserData ud_p = st[st.upvalue(1)];
+            UserData ud_e = st[st.upvalue(2)];
+
+            auto& p = ud_p.to<fs::path::iterator>();
+            auto& e = ud_e.to<fs::path::iterator>();
+            if (p == e) {
+                st.push(Nil());
+            } else if (!isreverse) {
+                UserData ret = st.newUserData<fs::path>(*p++);
+                make_path(st, ret);
+                st.push(ret);
+            } else {
+                UserData ret = st.newUserData<fs::path>(*--p);
+                make_path(st, ret);
+                st.push(ret);
+            }
+            return 1;
+        }, 3));
+        Closure f = st[-1];
+
+        if (isreverse){
+            f[1] = st.newUserData<fs::path::iterator>(path.end());
+            f[2] = st.newUserData<fs::path::iterator>(path.begin());
+        } else {
+            f[1] = st.newUserData<fs::path::iterator>(path.begin());
+            f[2] = st.newUserData<fs::path::iterator>(path.end());
+        }
+
+        st.push(f);
+        st.push(isreverse);
+        return 2;
     }
 
 
@@ -166,86 +226,30 @@ namespace metatable {
         mtab["is_absolute"] = st.newCallable(path_is_absolute);
         mtab["native"] = st.newCallable(path_native);
 
-        {
-            st.push(CClosure([](lua_State* _) {
-                State st(_);
-                if (!st[1].isuserdata()) {
-                    st.error("arg#1 should be a path userdata");
-                }
-
-                bool isreverse = false;
-                if (st.top() == 2 && st[2].isbool()) {
-                    isreverse = st[2];
-                }
-
-                UserData self = st[1];
-                auto& path = self.to<fs::path>();
-
-                st.push(CClosure([](lua_State* _) -> int {
-                    State st(_);
-
-                    bool isreverse = st[1];
-
-                    UserData ud_p = st[st.upvalue(1)];
-                    UserData ud_e = st[st.upvalue(2)];
-
-                    auto& p = ud_p.to<fs::path::iterator>();
-                    auto& e = ud_e.to<fs::path::iterator>();
-                    if (p == e) {
-                        st.push(Nil());
-                    } else if (!isreverse) {
-                        UserData ret = st.newUserData<fs::path>(*p++);
-                        make_path(st, ret);
-                        st.push(ret);
-                    } else {
-                        UserData ret = st.newUserData<fs::path>(*--p);
-                        make_path(st, ret);
-                        st.push(ret);
-                    }
-
-                    return 1;
-                }, 3));
-                Closure f = st[-1];
-
-                if (isreverse){
-                    f[1] = st.newUserData<fs::path::iterator>(path.end());
-                    f[2] = st.newUserData<fs::path::iterator>(path.begin());
-                } else {
-                    f[1] = st.newUserData<fs::path::iterator>(path.begin());
-                    f[2] = st.newUserData<fs::path::iterator>(path.end());
-                }
-
-                st.push(f);
-                st.push(isreverse);
-                return 2;
-            }));
-            Closure each = st[-1];
-            mtab["each"] = each;
-        }
+        { st.push(path_each); mtab["each"] = Closure(st[-1]); }
 
         return mtab;
     }
 
-    Number file_status_type(State& st, UserData&& self)
+    Number file_status_type(State& st, FileStatus&& self)
     {
-        return self.to<fs::file_status>().type();
+        return self.data().type();
     }
 
-    Number file_status_perms(State& st, UserData&& self)
+    Number file_status_perms(State& st, FileStatus&& self)
     {
-        fs::file_status& stat = self.to<fs::file_status>();
         if (st[-1].isnum()) { // setter
             auto newperms = static_cast<fs::perms>(Number(st[-1]));
-            stat.permissions(newperms);
+            self.data().permissions(newperms);
             return newperms;
         } else { // getter
-            return stat.permissions();
+            return self.data().permissions();
         }
     }
 
-    string file_status_typename(State& st, UserData&& self)
+    string file_status_typename(State& st, FileStatus&& self)
     {
-        int id = file_status_type(st, forward<UserData>(self));
+        int id = self.data().type();
         switch (id) {
         case fs::file_type::status_error:
             return "status_error";
@@ -291,8 +295,6 @@ namespace constructor {
     }
 }
 
-
-
 Table reg(State& st)
 {
     Table tab = st.newTable();
@@ -304,6 +306,8 @@ Table reg(State& st)
         Table path_mtab = metatable::path(st);
         st.registry()[path_registry_key] = path_mtab;
         path_mtab["stat"] = Closure(tab["status"]);
+        path_mtab["status"] = Closure(tab["status"]);
+        tab["stat"] = Closure(tab["status"]);
 
         Table file_status_mtab = metatable::file_status(st);
         st.registry()[file_status_registry_key] = file_status_mtab;

@@ -137,6 +137,11 @@ struct Table {
         return o.state == state &&
                 lua_compare(state, index, o.index, LUA_OPEQ);
     }
+
+    bool operator!=(const Table& o) const {
+        return !this->operator==(o);
+    }
+
     Table(Table&& o) : state(o.state), index(o.index) {
         o.state = nullptr;
         o.index = 0;
@@ -148,6 +153,8 @@ private:
 template<typename Sub>
 struct HasMetaTable {
     void set(const Table& metatab);
+    void set(const std::string& regkey);
+    void check(const std::string& regkey);
     Table get();
 };
 
@@ -979,6 +986,29 @@ void HasMetaTable<Sub>::set(const Table& metatab) {
         gd.status = VarPusher<Table>::push(p->state, metatab);
     }
     lua_setmetatable(p->state, p->index);
+}
+
+template<typename Sub>
+void HasMetaTable<Sub>::set(const std::string& registry_entry) {
+    Sub* p = static_cast<Sub*>(this);
+    lua_pushnil(p->state);
+    lua_copy(p->state, p->index, -1);
+    luaL_setmetatable(p->state, registry_entry.c_str());
+}
+
+template<typename Sub>
+void HasMetaTable<Sub>::check(const std::string& registry_entry) {
+    Sub* p = static_cast<Sub*>(this);
+    State st(p->state);
+    try {
+        Table mtab = get();
+        Table target_mtab = st.registry()[registry_entry];
+        if (target_mtab != mtab) {
+            st.error(std::string("expect a userdata (") + registry_entry + ")");
+        }
+    } catch (NoMetatableError& e) {
+        st.error(std::string("userdata has no metatable, expect") + registry_entry);
+    }
 }
 
 
