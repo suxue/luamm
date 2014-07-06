@@ -19,35 +19,67 @@
 
 namespace luamm {
 
+    // utility classes and functions
+    namespace {
+        class AutoPopper {
+            lua_State* state;
+            int n;
+        public:
+            AutoPopper(lua_State* st, int n = 1) : state(st), n(n) {}
+            ~AutoPopper() { if (n > 0) lua_pop(state, n);  }
+        };
+
+        inline void cleanup(lua_State* state, int index) {
+            if (state && index == lua_gettop(state)) {
+                lua_pop(state, 1);
+            }
+        }
+    }
+
+
 /* make aliases for lua types */
 typedef lua_Number Number;
-
-class Nil {};
-
 typedef lua_CFunction CFunction;
 
+/* primitive lua typs */
+class Nil {};
+
+/* type trait distinguishes value(primitive) and non-value lua types */
+// value == 0, iff non-value type, Closure, Table etc
+// value == 1, iff value type Number, string, boolean, Nil etc
 template<typename T>
 struct StackVariable {
     enum { value = 0 };
 };
 
+/* Base class for errors */
 struct RuntimeError : std::runtime_error {
     RuntimeError(const std::string& s) : std::runtime_error(s) {}
     RuntimeError() : std::runtime_error("") {}
 };
 
-
+/* defines a static member funcion push() for each type of variable
+ * that permitted to be passed into lua runtime environmrnt */
 template<typename T>
 struct VarPusher;
 
+/* defines a static member function get() for read a lua variable
+ * uniquely identified by key of type Key into elem of type Elem
+ */
 template<typename Container, typename Key, typename Elem>
 struct KeyGetter;
+
+/* similar to KeyGetter, but set elem instead of getting */
 template<typename Container, typename Key, typename Elem>
 struct KeySetter;
+
+/* return the lua type of variable indexed by key */
 template<typename Container, typename Key>
 struct KeyTyper;
 
 class AutoVariant;
+
+/* router class for read/write/update a lua variable */
 template<typename Container, typename Key, typename KeyStore = Key>
 class Variant  {
     friend AutoVariant;
@@ -103,6 +135,9 @@ public:
     }
 };
 
+/* rip out the corresponding value within lua stack after a reading
+ * iff it is a value-type variable
+ */
 class AutoVariant {
     Variant<lua_State*, int> variant;
 public:
@@ -150,6 +185,8 @@ private:
     Table(const Table&);
 };
 
+/* interface that lua variable types which can have corresponding metatable
+ */
 template<typename Sub>
 struct HasMetaTable {
     void set(const Table& metatab);
@@ -158,11 +195,13 @@ struct HasMetaTable {
     Table get();
 };
 
+/* a closure in lua is a tuple of
+ * #1, a function pointer who follows the lua cfunction signature
+ * #2, the number of upvalues
+ */
 struct CClosure {
     int index;
     CFunction func;
-    // used as in parameter, represents number of upvalues
-    // used as out parameter, represents index in the stack
 public:
     CClosure(CFunction func, int index = 0)
         : index(index), func(func) {}
@@ -221,7 +260,7 @@ struct VarProxy<CClosure> : VarBase {
     }
 };
 
-// light userdata
+// light userdata is just a void* pointer
 template<>
 struct VarProxy<void*> : VarBase {
     bool push(void* l) {
@@ -297,6 +336,10 @@ struct VarProxy<Number> : VarBase  {
 };
 
 
+/* all in/out lua variable types that expected to be converted to/from
+ * automatically (as a function arguments or return value)
+ * should be placed in this mpl vector.
+ */
 typedef boost::mpl::vector<
             std::string,
             const char*,
@@ -308,6 +351,9 @@ typedef boost::mpl::vector<
         > varproxies;
 struct PlaceHolder {};
 
+/* decide which type in varproxies provide the matching proxy for typename
+ * Var
+ */
 template<typename Proxy, typename Var>
 struct PredPush {
     typedef struct { char _[2]; } two;
@@ -399,17 +445,7 @@ struct Guard {
 
 struct VarPushError : RuntimeError { VarPushError() : RuntimeError("") {} };
 
-template<typename T>
-struct PassingConvention {
-    typedef T type;
-};
-
-template<>
-struct PassingConvention<Table> {
-    typedef Table& type;
-};
-
-
+/* generate a tuple to simulate multiple return value in c++*/
 template<int I, typename Arg,  typename... Args>
 struct GenTuple  {
     typedef typename GenTuple<I-1, Arg, Args..., Arg>::type type;
@@ -420,7 +456,8 @@ struct GenTuple<0, Arg, Args...> {
     typedef std::tuple<Args...> type;
 };
 
-
+/* a callable representing a lua variable exitsing in the stack,
+ * either a c function or a lua function  */
 struct Closure : public HasMetaTable<Closure> {
     lua_State* state;
     int index;
@@ -487,11 +524,6 @@ private:
 };
 
 template<>
-struct PassingConvention<Closure> {
-    typedef Closure& type;
-};
-
-template<>
 inline void Closure::__return__<0>() {}
 
 template<>
@@ -500,6 +532,7 @@ inline typename Closure::Rvals<1>::type Closure::__return__<1>() {
     return Closure::Rvals<1>::type(state, lua_gettop(state));
 }
 
+/* the maximum return values you can retrieved after calling Closure */
 #ifndef LUAMM_MAX_RETVALUES
 #define LUAMM_MAX_RETVALUES 15
 #endif
@@ -551,16 +584,6 @@ struct KeyPutError : RuntimeError { KeyPutError() : RuntimeError("") {} };
 struct VarGetError : RuntimeError { VarGetError() : RuntimeError("") {} };
 
 
-
-class AutoPopper {
-    lua_State* state;
-    int n;
-public:
-    AutoPopper(lua_State* st, int n = 1) : state(st), n(n) {}
-    ~AutoPopper() { if (n > 0) lua_pop(state, n);  }
-};
-
-
 template<>
 struct VarProxy<Table> : VarBase {
     bool push(const Table& tb) {
@@ -579,24 +602,26 @@ struct VarProxy<Table> : VarBase {
     enum { tid = LUA_TTABLE };
 };
 
-template<typename T>
-struct VarDispatcher {
+namespace {
+    template<typename T>
+    struct VarDispatcher {
 
-   template<typename C>
-   static char testget( decltype(&VarProxy<C>::get) );
+       template<typename C>
+       static char testget( decltype(&VarProxy<C>::get) );
 
-   template<typename C>
-   static double testget( ... );
+       template<typename C>
+       static double testget( ... );
 
-   template<typename C>
-   static char testpush( decltype(&VarProxy<C>::push) );
+       template<typename C>
+       static char testpush( decltype(&VarProxy<C>::push) );
 
-   template<typename C>
-   static double testpush( ... );
+       template<typename C>
+       static double testpush( ... );
 
-   enum { use_indirect_get = sizeof(testget<T>(nullptr)) != 1 };
-   enum { use_indirect_push = sizeof(testpush<T>(nullptr)) != 1 };
-};
+       enum { use_indirect_get = sizeof(testget<T>(nullptr)) != 1 };
+       enum { use_indirect_push = sizeof(testpush<T>(nullptr)) != 1 };
+    };
+}
 
 template<typename T>
 struct VarPusher {
@@ -775,6 +800,7 @@ struct KeySetter<Table*, Key, Var> {
     }
 };
 
+/* wrap an existing lua_State */
 class State {
 protected:
     lua_State *ptr_;
@@ -913,6 +939,7 @@ inline lua_State* State::ptr() {
     return ptr_;
 }
 
+/* State with a new lua_State */
 inline NewState::NewState()
     : State(luaL_newstate()) {
 }
@@ -925,12 +952,6 @@ inline Table::Table(lua_State* st, int i)
     : state(st), index(lua_absindex(st,i)) {
     assert(state);
     assert(index);
-}
-
-inline void cleanup(lua_State* state, int index) {
-    if (state && index == lua_gettop(state)) {
-        lua_pop(state, 1);
-    }
 }
 
 template<typename T>
