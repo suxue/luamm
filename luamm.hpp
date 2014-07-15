@@ -77,18 +77,33 @@ struct KeySetter;
 template<typename Container, typename Key>
 struct KeyTyper;
 
-class AutoVariant;
+template<typename Container, typename KeyStore>
+struct AutoCleaner {
+    template<typename T>
+    static void clean(const Container& _, const KeyStore& k) {}
+};
+
+template<>
+struct AutoCleaner<lua_State*,int> {
+    template<typename T>
+    static void clean(lua_State* state, int index) {
+        if (lua_gettop(state) == index &&
+                !StackVariable<T>::value) {
+            lua_pop(state, 1);
+        }
+    }
+};
 
 /* router class for read/write/update a lua variable */
 template<typename Container, typename Key, typename KeyStore = Key>
 class Variant  {
-    friend AutoVariant;
 private:
     KeyStore index;
     Container state;
+    bool autoclean;
 public:
-    Variant(Container st, const Key& i)
-        : index(i), state(st)  {}
+    Variant(Container st, const Key& i, bool autoclean = false)
+        : index(i), state(st), autoclean(autoclean)  {}
 
     template<typename T>
     T to() const {
@@ -97,7 +112,11 @@ public:
 
     template<typename T>
     operator T() const  {
-        return to<T>();
+        T o = to<T>();
+        if (autoclean) {
+            AutoCleaner<Container, KeyStore>::template clean<T>(state, index);
+        }
+        return o;
     }
 
     template<typename T>
@@ -138,21 +157,10 @@ public:
 /* rip out the corresponding value within lua stack after a reading
  * iff it is a value-type variable
  */
-class AutoVariant {
-    Variant<lua_State*, int> variant;
+class AutoVariant : public Variant<lua_State*, int> {
 public:
-    AutoVariant(lua_State* st, int i) : variant(st, i) {}
-
-    AutoVariant(AutoVariant&& o) : variant(std::move(o.variant)) {}
-    AutoVariant& operator=(AutoVariant&& o) {
-        variant = std::move(o.variant);
-        return *this;
-    }
-
-    int type() { return variant.type(); }
-
-    template<typename T>
-    operator T() const;
+    AutoVariant(lua_State* st, int i)
+        : Variant<lua_State*,int>(st, i, true) {}
 };
 
 
@@ -954,15 +962,6 @@ inline Table::Table(lua_State* st, int i)
     assert(index);
 }
 
-template<typename T>
-AutoVariant::operator T() const {
-    T o = variant.to<T>();
-    if (lua_gettop(variant.state) == variant.index &&
-            !StackVariable<T>::value) {
-        lua_pop(variant.state, 1);
-    }
-    return o;
-}
 
 inline Table::~Table() {
     cleanup(state, index);
