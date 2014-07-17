@@ -317,7 +317,8 @@ Table reg(State& st)
 }
 
 
-extern "C" int luaopen_fs(lua_State *L) {
+LUAMM_MODULE(fs, L)
+{
     State st(L);
 
     const char *modname = st[1];

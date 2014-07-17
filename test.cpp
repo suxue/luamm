@@ -245,7 +245,7 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     BOOST_CHECK_EQUAL(lua.top(), 3);
 
     {
-        Closure cl = lua.newCallable([](State st, Number num) -> Number {
+        Closure cl = lua.newCallable([](State& st, Number num) -> Number {
             return num + 7777;
         });
         BOOST_CHECK_EQUAL(lua.top(), 4);
@@ -257,7 +257,7 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     BOOST_CHECK_EQUAL(lua.top(), 3);
 
     { // return void
-        Closure cl = lua.newCallable([](State st, string&& key, Number num) {
+        Closure cl = lua.newCallable([](State& st, string&& key, Number num) {
             st[key] = num;
         });
         cl.call<0>("hello", 12);
@@ -266,7 +266,7 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     BOOST_CHECK_EQUAL(lua.top(), 3);
 
     { // simple multiple return
-        Closure cl = lua.newCallable([](State st, Number a, Number b) {
+        Closure cl = lua.newCallable([](State& st, Number a, Number b) {
             return make_tuple(b, a);
         });
         lua["test"] = cl;
@@ -280,7 +280,7 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     { // simple multiple return
         auto scope = lua.newScope();
 
-        Closure cl = lua.newCallable([](State st, Number a, Number b) {
+        Closure cl = lua.newCallable([](State& st, Number a, Number b) {
             return make_tuple(b, a);
         });
 
@@ -316,5 +316,28 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         BOOST_CHECK_EQUAL(a+b+d+e+f, 29);
     }
     BOOST_CHECK_EQUAL(lua.top(), 3);
+
+    {
+        Closure cl = lua.newCallable([](int i, int j) {
+                return i*j;
+        });
+        BOOST_CHECK_EQUAL(Number(cl(2,4)), 8);
+        BOOST_CHECK_EQUAL(Number(cl(200,300)), 60000);
+    }
+    BOOST_CHECK_EQUAL(lua.top(), 3);
+
+    lua.settop(0);
+    {
+        // test module system
+        struct Hello {};
+        Table mod = move(
+            lua.class_<Hello>("hello")
+            .def("add", [](int i, int j) { return i+j; })
+        );
+        BOOST_CHECK_EQUAL((const char*)mod["modname"], "hello");
+        Closure add = mod["add"];
+        BOOST_CHECK_EQUAL(Number(add(1,2)), 3);
+    }
+    BOOST_CHECK_EQUAL(lua.top(), 0);
 }
 

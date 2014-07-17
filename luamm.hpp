@@ -16,6 +16,7 @@
 #include <boost/mpl/size.hpp>
 #include <boost/mpl/vector.hpp>
 #include <boost/preprocessor.hpp>
+#include <iostream>
 
 namespace luamm {
 
@@ -808,6 +809,33 @@ struct KeySetter<Table*, Key, Var> {
     }
 };
 
+class State;
+template<typename Class>
+class Class_ {
+    friend State;
+    Class_(const std::string& name, State& state);
+    std::string name;
+    State& state;
+    Table mod;
+public:
+    template<typename T>
+    typename std::enable_if<
+        std::is_member_function_pointer<T*>::value, Class_<Class>&>::type
+    def(const std::string& method, T* method_pointer);
+
+
+    template<typename T>
+    typename std::enable_if<
+        !std::is_member_function_pointer<T*>::value, Class_<Class>&>::type
+    def(const std::string& method, T callable);
+
+    Class_(Class_&& o)
+        : name(std::move(o.name)), state(o.state), mod(std::move(o.mod)) {}
+    operator Table() && { return std::move(mod); }
+};
+
+
+
 /* wrap an existing lua_State */
 class State {
 protected:
@@ -844,9 +872,9 @@ public:
     }
 
     template<typename T, typename... Args>
-    UserData newUserData(Args... args) {
+    UserData newUserData(Args&& ... args) {
         void * buf = lua_newuserdata(ptr(), sizeof(T));
-        new (buf) T(args...);
+        new (buf) T(std::forward<Args>(args)...);
         return UserData(ptr(), -1);
     }
 
@@ -929,7 +957,73 @@ public:
     bool onstack(int index) {
         return index > LUAI_FIRSTPSEUDOIDX;
     }
+
+    template<typename Class>
+    Class_<Class> class_(const std::string& name) {
+        return Class_<Class>(name, *this);
+    }
 };
+
+template<typename MemberFuncPtr, typename ThisType, typename... Args>
+struct MemberFunctionWrapper {
+    MemberFuncPtr p;
+    MemberFunctionWrapper(MemberFuncPtr p) : p(p) {}
+
+    boost::function_types::result_type<MemberFuncPtr>
+    operator()(State& st, UserData&& self, Args... args) {
+        auto& hidden_this = self.to<ThisType>();
+        return (hidden_this.*p)(std::forward<Args>(args)...);
+    }
+};
+
+template<typename MemberFuncPtr, typename ThisType,
+         int size, typename PARALIST, typename... Args>
+struct MemberFunctionTransformer {
+    typedef typename MemberFunctionTransformer<
+        MemberFuncPtr, ThisType, size-1,
+        typename boost::mpl::pop_front<PARALIST>::type,
+        typename boost::mpl::at_c<PARALIST, 0>::type, Args...>::type type;
+};
+
+template<typename MemberFuncPtr, typename ThisType,
+         typename PARALIST, typename... Args>
+struct MemberFunctionTransformer<MemberFuncPtr, ThisType, 0, PARALIST, Args...> {
+    typedef MemberFunctionWrapper<MemberFuncPtr, ThisType, Args...> type;
+};
+
+template<typename Class>
+template<typename T>
+typename std::enable_if<
+    std::is_member_function_pointer<T*>::value, Class_<Class>&>::type
+Class_<Class>::def(const std::string& method, T* method_ptr)
+{
+    typedef typename boost::function_types::parameter_types<T*>::type
+        full_para_t;
+    typedef std::remove_reference<
+        typename boost::mpl::at_c<full_para_t, 0>::type> this_t;
+    typedef typename boost::mpl::pop_front<full_para_t>::type para_t;
+    typedef typename MemberFunctionTransformer<T*, this_t,
+            boost::mpl::size<para_t>::value, para_t>::type Wrapper;
+    mod[method] = state.newCallable(Wrapper(method_ptr));
+    return *this;
+}
+
+template<typename Class>
+template<typename T>
+typename std::enable_if<
+    !std::is_member_function_pointer<T*>::value, Class_<Class>&>::type
+Class_<Class>::def(const std::string& method, T callable)
+{
+    mod[method] = state.newCallable(callable);
+    return *this;
+}
+
+template<typename Class>
+Class_<Class>::Class_(const std::string& name, State& state)
+    : name(name), state(state), mod(state.newTable()) {
+    mod["modname"] = name;
+    mod["modfilename"] = __FILE__;
+}
 
 inline State::State(const State& o) : ptr_(o.ptr_) {}
 
@@ -1114,6 +1208,7 @@ template<typename TL>
 struct TypeChecker<TL, 0> {
     static void check(State& st, int offset) {} };
 
+
 template<typename F>
 struct ToLambda {
     typedef decltype(&F::operator()) lambda_t;
@@ -1126,9 +1221,58 @@ struct ToLambda {
 
 template<typename F>
 struct ToLambda<F*> {
+    static_assert(std::is_function<F>::value, "F* should be a function pointer");
     typedef F lambda_t;
     typedef typename boost::function_types::parameter_types<
         lambda_t>::type para_t;
+};
+
+template<typename Callable>
+struct IsCanonicalCallable {
+    enum { value = std::is_same<State&,
+                      typename boost::mpl::at_c<
+                      typename ToLambda<Callable>::para_t, 0>::type>::value };
+};
+
+template<typename Callable, typename... Args>
+struct CanonicalWrapper {
+    Callable callable;
+    CanonicalWrapper(Callable callable) : callable(callable) { }
+    typename boost::function_types::result_type<
+        typename ToLambda<Callable>::lambda_t>::type
+    operator()(State&, Args... args) {
+        return callable(std::forward<Args>(args)...);
+    }
+};
+
+template<typename Callable, int size, typename PARALIST, typename... Args>
+struct CanonicalTransformer {
+    typedef typename CanonicalTransformer<Callable, size-1,
+                typename boost::mpl::pop_front<PARALIST>::type,
+                typename boost::mpl::at_c<PARALIST,0>::type,
+                Args...>::type type;
+};
+
+template<typename Callable, typename PARALIST, typename... Args>
+struct CanonicalTransformer<Callable, 0, PARALIST, Args...> {
+    typedef CanonicalWrapper<Callable, Args...> type;
+};
+
+template<typename Callable>
+struct CanonicalCallable {
+    typedef typename ToLambda<Callable>::para_t para_t;
+    typedef typename CanonicalTransformer<Callable,
+                                          boost::mpl::size<para_t>::value,
+                                          para_t>::type type;
+};
+
+// callables SHOULD carry State& as its first argument, if not, we would
+// add one through this template
+template<typename Callable>
+struct ToCanonicalCallable {
+    typedef typename std::conditional<IsCanonicalCallable<Callable>::value,
+        Callable,
+        typename CanonicalCallable<Callable>::type>::type type;
 };
 
 template<typename C>
@@ -1217,8 +1361,10 @@ namespace {
 template<typename F>
 Closure State::newCallable(F func, int extra_upvalues)
 {
+    typename ToCanonicalCallable<F>::type canonical_callable(func);
+
     typedef ReturnValue<typename CallableCall<F>::result_t> RetType;
-    lua_Lambda lambda = [func](lua_State* st) -> int {
+    lua_Lambda lambda = [canonical_callable](lua_State* st) -> int {
         // allocate a slot for return value
         State lua(st);
 
@@ -1231,7 +1377,7 @@ Closure State::newCallable(F func, int extra_upvalues)
         }
 
         try {
-        CallableCall<F>::call(func, st);
+        CallableCall<decltype(canonical_callable)>::call(canonical_callable, st);
         } catch (std::exception& e) {
             lua.error(e.what());
         }
@@ -1263,5 +1409,7 @@ Closure State::newCallable(F func, int extra_upvalues)
 }
 
 } // end namespace
+
+#define LUAMM_MODULE(name, state) extern "C" int luaopen_##name(lua_State *state)
 
 #endif
