@@ -339,5 +339,30 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         BOOST_CHECK_EQUAL(Number(add(1,2)), 3);
     }
     BOOST_CHECK_EQUAL(lua.top(), 0);
+
+    {
+        // simple class binding
+        struct Counter {
+            int num;
+            Counter() : num(0) {}
+            void add(int i) { num += i; }
+            int get() { return num; }
+        };
+        Table mod = move(
+            lua.class_<Counter>("counter")
+            .def("get", &Counter::get)
+            .def("add", &Counter::add)
+            .init() // enable default constructor
+        );
+        lua["counter"] = mod;
+        Closure testcl = lua.newFunc(R"==(
+            x = counter();
+            x:add(100);
+            x:add(1000);
+            return x:get()
+        )==");
+        BOOST_CHECK_EQUAL(Number(testcl()), 1100);
+    }
+    BOOST_CHECK_EQUAL(lua.top(), 0);
 }
 

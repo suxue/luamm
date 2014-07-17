@@ -190,6 +190,10 @@ struct Table {
         o.state = nullptr;
         o.index = 0;
     }
+
+    bool hasMetaTable() {
+        return lua_getmetatable(state, index) ? true : false;
+    }
 private:
     Table(const Table&);
 };
@@ -202,6 +206,10 @@ struct HasMetaTable {
     void set(const std::string& regkey);
     void check(const std::string& regkey);
     Table get();
+    bool hasMetaTable() {
+        Sub* this_ = static_cast<Sub*>(this);
+        return lua_getmetatable(this_->state, this_->index) ? true : false;
+    }
 };
 
 /* a closure in lua is a tuple of
@@ -815,23 +823,29 @@ class Class_ {
     friend State;
     Class_(const std::string& name, State& state);
     std::string name;
+    std::string metatable_key;
     State& state;
     Table mod;
 public:
     template<typename T>
     typename std::enable_if<
-        std::is_member_function_pointer<T*>::value, Class_<Class>&>::type
-    def(const std::string& method, T* method_pointer);
-
+        std::is_member_function_pointer<T>::value, Class_<Class>&>::type
+    def(const std::string& method, T method_pointer);
 
     template<typename T>
     typename std::enable_if<
-        !std::is_member_function_pointer<T*>::value, Class_<Class>&>::type
+        !std::is_member_function_pointer<T>::value, Class_<Class>&>::type
     def(const std::string& method, T callable);
 
     Class_(Class_&& o)
         : name(std::move(o.name)), state(o.state), mod(std::move(o.mod)) {}
+
+    // enable default constructor
+    Class_<Class>& init();
+
     operator Table() && { return std::move(mod); }
+
+    Table getMetaTable();
 };
 
 
@@ -969,7 +983,7 @@ struct MemberFunctionWrapper {
     MemberFuncPtr p;
     MemberFunctionWrapper(MemberFuncPtr p) : p(p) {}
 
-    boost::function_types::result_type<MemberFuncPtr>
+    decltype( (std::declval<ThisType>().*p)(std::declval<Args>()...) )
     operator()(State& st, UserData&& self, Args... args) {
         auto& hidden_this = self.to<ThisType>();
         return (hidden_this.*p)(std::forward<Args>(args)...);
@@ -994,15 +1008,15 @@ struct MemberFunctionTransformer<MemberFuncPtr, ThisType, 0, PARALIST, Args...> 
 template<typename Class>
 template<typename T>
 typename std::enable_if<
-    std::is_member_function_pointer<T*>::value, Class_<Class>&>::type
-Class_<Class>::def(const std::string& method, T* method_ptr)
+    std::is_member_function_pointer<T>::value, Class_<Class>&>::type
+Class_<Class>::def(const std::string& method, T method_ptr)
 {
-    typedef typename boost::function_types::parameter_types<T*>::type
+    typedef typename boost::function_types::parameter_types<T>::type
         full_para_t;
-    typedef std::remove_reference<
-        typename boost::mpl::at_c<full_para_t, 0>::type> this_t;
+    typedef typename std::remove_reference<
+        typename boost::mpl::at_c<full_para_t, 0>::type>::type this_t;
     typedef typename boost::mpl::pop_front<full_para_t>::type para_t;
-    typedef typename MemberFunctionTransformer<T*, this_t,
+    typedef typename MemberFunctionTransformer<T, this_t,
             boost::mpl::size<para_t>::value, para_t>::type Wrapper;
     mod[method] = state.newCallable(Wrapper(method_ptr));
     return *this;
@@ -1011,7 +1025,7 @@ Class_<Class>::def(const std::string& method, T* method_ptr)
 template<typename Class>
 template<typename T>
 typename std::enable_if<
-    !std::is_member_function_pointer<T*>::value, Class_<Class>&>::type
+    !std::is_member_function_pointer<T>::value, Class_<Class>&>::type
 Class_<Class>::def(const std::string& method, T callable)
 {
     mod[method] = state.newCallable(callable);
@@ -1019,10 +1033,36 @@ Class_<Class>::def(const std::string& method, T callable)
 }
 
 template<typename Class>
+Table Class_<Class>::getMetaTable() {
+    if (mod.hasMetaTable()) {
+        return mod.get();
+    } else {
+        mod.set(state.newTable());
+        return mod.get();
+    }
+}
+
+template<typename Class>
+Class_<Class>& Class_<Class>::init()
+{
+    std::string mkey = metatable_key;
+    getMetaTable()["__call"] = state.newCallable([mkey](State& st) {
+        UserData ud = st.newUserData<Class>();
+        ud.set(mkey);
+        return ud;
+    });
+    return *this;
+}
+
+template<typename Class>
 Class_<Class>::Class_(const std::string& name, State& state)
     : name(name), state(state), mod(state.newTable()) {
+    // initialize metatable
     mod["modname"] = name;
     mod["modfilename"] = __FILE__;
+    mod["__index"] = mod;
+    metatable_key = name + __FILE__ + ":" +  std::to_string(__LINE__);
+    state.registry()[metatable_key] = mod;
 }
 
 inline State::State(const State& o) : ptr_(o.ptr_) {}
@@ -1125,7 +1165,6 @@ void HasMetaTable<Sub>::check(const std::string& registry_entry) {
     }
 }
 
-
 template<typename Sub>
 Table HasMetaTable<Sub>::get() {
     Sub* p = static_cast<Sub*>(this);
@@ -1208,7 +1247,6 @@ template<typename TL>
 struct TypeChecker<TL, 0> {
     static void check(State& st, int offset) {} };
 
-
 template<typename F>
 struct ToLambda {
     typedef decltype(&F::operator()) lambda_t;
@@ -1230,8 +1268,8 @@ struct ToLambda<F*> {
 template<typename Callable>
 struct IsCanonicalCallable {
     enum { value = std::is_same<State&,
-                      typename boost::mpl::at_c<
-                      typename ToLambda<Callable>::para_t, 0>::type>::value };
+                   typename boost::mpl::at_c<
+                   typename ToLambda<Callable>::para_t, 0>::type>::value };
 };
 
 template<typename Callable, typename... Args>
