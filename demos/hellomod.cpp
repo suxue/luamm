@@ -29,7 +29,5 @@ extern "C" int luaopen_hello(lua_State *L) {
     Table mod = reg(st);
     cerr << "load " << modname << " from " << modfile << endl;
 
-    st[1] = mod;
-    st.settop(1);
-    return 1;
+    LUAMM_MODULE_RETURN(st, mod);
 }

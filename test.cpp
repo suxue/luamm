@@ -344,7 +344,7 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         // simple class binding
         struct Counter {
             int num;
-            Counter() : num(0) {}
+            Counter(int initial_value) : num(initial_value) {}
             void add(int i) { num += i; }
             int get() { return num; }
         };
@@ -352,11 +352,11 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
             lua.class_<Counter>("counter")
             .def("get", &Counter::get)
             .def("add", &Counter::add)
-            .init() // enable default constructor
+            .init<int>() // enable default constructor
         );
         lua["counter"] = mod;
         Closure testcl = lua.newFunc(R"==(
-            x = counter();
+            x = counter(0);
             x:add(100);
             x:add(1000);
             return x:get()

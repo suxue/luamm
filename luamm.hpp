@@ -177,6 +177,10 @@ struct Table {
     void set(const Table& metatab);
     Table get();
 
+    int length() {
+        return lua_rawlen(state, index);
+    }
+
     bool operator==(const Table& o) const {
         return o.state == state &&
                 lua_compare(state, index, o.index, LUA_OPEQ);
@@ -823,7 +827,6 @@ class Class_ {
     friend State;
     Class_(const std::string& name, State& state);
     std::string name;
-    std::string metatable_key;
     State& state;
     Table mod;
 public:
@@ -840,7 +843,8 @@ public:
     Class_(Class_&& o)
         : name(std::move(o.name)), state(o.state), mod(std::move(o.mod)) {}
 
-    // enable default constructor
+    // enable custom constructor
+    template<typename... Args>
     Class_<Class>& init();
 
     operator Table() && { return std::move(mod); }
@@ -1042,15 +1046,20 @@ Table Class_<Class>::getMetaTable() {
     }
 }
 
+#define METATABLE_KEY (std::string((const char*)mod["modname"]) + "_LUAMM")
+
 template<typename Class>
+template<typename... Args>
 Class_<Class>& Class_<Class>::init()
 {
-    std::string mkey = metatable_key;
-    getMetaTable()["__call"] = state.newCallable([mkey](State& st) {
-        UserData ud = st.newUserData<Class>();
-        ud.set(mkey);
-        return ud;
-    });
+    std::string mkey = METATABLE_KEY;
+    getMetaTable()["__call"] = state.newCallable(
+        [mkey](State& st, Table&& tab, Args&&... args) {
+            UserData ud = st.newUserData<Class>(std::forward<Args>(args)...);
+            ud.set(mkey);
+            return ud;
+        }
+    );
     return *this;
 }
 
@@ -1059,11 +1068,11 @@ Class_<Class>::Class_(const std::string& name, State& state)
     : name(name), state(state), mod(state.newTable()) {
     // initialize metatable
     mod["modname"] = name;
-    mod["modfilename"] = __FILE__;
     mod["__index"] = mod;
-    metatable_key = name + __FILE__ + ":" +  std::to_string(__LINE__);
-    state.registry()[metatable_key] = mod;
+    state.registry()[METATABLE_KEY] = mod;
 }
+
+#undef METATABLE_KEY
 
 inline State::State(const State& o) : ptr_(o.ptr_) {}
 
@@ -1449,5 +1458,6 @@ Closure State::newCallable(F func, int extra_upvalues)
 } // end namespace
 
 #define LUAMM_MODULE(name, state) extern "C" int luaopen_##name(lua_State *state)
+#define LUAMM_MODULE_RETURN(state, tab) state[1] = tab; st.settop(1); return 1;
 
 #endif
