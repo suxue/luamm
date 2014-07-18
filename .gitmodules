@@ -1,0 +1,3 @@
+[submodule "autoconf-common"]
+	path = autoconf-common
+	url = git@github.com:suxue/autoconf-common.git

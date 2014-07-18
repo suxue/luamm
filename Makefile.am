@@ -1,4 +1,4 @@
-ACLOCAL_AMFLAGS = -I ../m4
+ACLOCAL_AMFLAGS = -I autoconf-common/m4
 
 if BUILD_DEMOS
 SUBDIRS = demos/
@@ -24,7 +24,7 @@ test: luamm_test$(EXEEXT) demo_test
 if HAVE_GCOV
 bin_PROGRAMS += luamm_cov
 
-include $(srcdir)/../Makefile.am.coverage
+include $(srcdir)/autoconf-common/Makefile.am.coverage
 
 coverage-executation: luamm_cov$(EXEEXT)
 	./luamm_cov$(EXEEXT)
