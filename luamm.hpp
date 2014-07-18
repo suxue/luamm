@@ -13,6 +13,7 @@
 
 #include <boost/function_types/parameter_types.hpp>
 #include <boost/function_types/result_type.hpp>
+#include <boost/mpl/pair.hpp>
 #include <boost/mpl/fold.hpp>
 #include <boost/mpl/size.hpp>
 #include <boost/mpl/vector.hpp>
@@ -983,8 +984,10 @@ public:
     }
 };
 
-template<typename MemberFuncPtr, typename ThisType, typename... Args>
+template<typename Data, typename... Args>
 struct MemberFunctionWrapper {
+    typedef typename Data::first MemberFuncPtr;
+    typedef typename Data::second ThisType;
     MemberFuncPtr p;
     MemberFunctionWrapper(MemberFuncPtr p) : p(p) {}
 
@@ -995,20 +998,21 @@ struct MemberFunctionWrapper {
     }
 };
 
-template<typename MemberFuncPtr, typename ThisType,
-         int size, typename PARALIST, typename... Args>
-struct MemberFunctionTransformer {
-    typedef typename MemberFunctionTransformer<
-        MemberFuncPtr, ThisType, size-1,
-        typename boost::mpl::pop_front<PARALIST>::type,
+
+template<template<class, class...> class T, typename Data,
+        typename ParaList, int size = boost::mpl::size<ParaList>::value,
+        typename... Args>
+struct ParameterListTransformer {
+    typedef typename ParameterListTransformer<T, Data,
+        typename boost::mpl::pop_front<ParaList>::type, size - 1,
         Args...,
-        typename boost::mpl::at_c<PARALIST, 0>::type>::type type;
+        typename boost::mpl::at_c<ParaList,0>::type>::type type;
 };
 
-template<typename MemberFuncPtr, typename ThisType,
-         typename PARALIST, typename... Args>
-struct MemberFunctionTransformer<MemberFuncPtr, ThisType, 0, PARALIST, Args...> {
-    typedef MemberFunctionWrapper<MemberFuncPtr, ThisType, Args...> type;
+template<template<class, class...> class T, typename Data,
+        typename ParaList, typename... Args>
+struct ParameterListTransformer<T, Data, ParaList, 0, Args...> {
+    typedef T<Data, Args...> type;
 };
 
 
@@ -1042,8 +1046,10 @@ Class_<Class>::def(const std::string& method, T method_ptr)
     typedef typename std::remove_reference<
         typename boost::mpl::at_c<full_para_t, 0>::type>::type this_t;
     typedef typename boost::mpl::pop_front<full_para_t>::type para_t;
-    typedef typename MemberFunctionTransformer<T, this_t,
-            boost::mpl::size<para_t>::value, para_t>::type Wrapper;
+    typedef typename ParameterListTransformer<
+                MemberFunctionWrapper,
+                boost::mpl::pair<T, this_t>,
+                para_t>::type Wrapper;
     mod[method] = state.newCallable(Wrapper(method_ptr));
     return *this;
 }
@@ -1313,26 +1319,12 @@ struct CanonicalWrapper {
     }
 };
 
-template<typename Callable, int size, typename PARALIST, typename... Args>
-struct CanonicalTransformer {
-    typedef typename CanonicalTransformer<Callable, size-1,
-                typename boost::mpl::pop_front<PARALIST>::type,
-                Args...,
-                typename boost::mpl::at_c<PARALIST,0>::type
-                >::type type;
-};
-
-template<typename Callable, typename PARALIST, typename... Args>
-struct CanonicalTransformer<Callable, 0, PARALIST, Args...> {
-    typedef CanonicalWrapper<Callable, Args...> type;
-};
-
 template<typename Callable>
 struct CanonicalCallable {
     typedef typename ToLambda<Callable>::para_t para_t;
-    typedef typename CanonicalTransformer<Callable,
-                                          boost::mpl::size<para_t>::value,
-                                          para_t>::type type;
+    typedef typename ParameterListTransformer<CanonicalWrapper,
+                                              Callable,
+                                              para_t>::type type;
 };
 
 // callables SHOULD carry State& as its first argument, if not, we would
