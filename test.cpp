@@ -364,5 +364,43 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         BOOST_CHECK_EQUAL(Number(testcl()), 1100);
     }
     BOOST_CHECK_EQUAL(lua.top(), 0);
+
+    {
+        // class member getter and setter
+        struct Data {
+            int num;
+        };
+        Table mod = move(
+            lua.class_<Data>("data")
+            .init()
+            .attribute("num", &Data::num)
+        );
+        Closure setter = lua.newFunc(R"==(
+            local data = ...
+            d = data();
+            return d:setNum(5);
+        )==");
+        UserData d = setter(mod, mod);
+        BOOST_CHECK_EQUAL(d.to<Data>().num, 5);
+
+        d.to<Data>().num = 10;
+        BOOST_CHECK_EQUAL(Number( Closure(mod["getNum"])(d) ), 10);
+    }
+    BOOST_CHECK_EQUAL(lua.top(), 0);
+
+    {
+        // long parameter list
+        Closure cl = lua.newCallable([](int a, int b, int c, int d, int e) {
+            return make_tuple(e, d, c, b, a);
+        });
+        int a, b, c, d, e;
+        tie(e, d, c, b, a) = cl.call<5>(1,2,3,4,5);
+        BOOST_CHECK_EQUAL(a, 1);
+        BOOST_CHECK_EQUAL(b, 2);
+        BOOST_CHECK_EQUAL(c, 3);
+        BOOST_CHECK_EQUAL(d, 4);
+        BOOST_CHECK_EQUAL(e, 5);
+    }
+    BOOST_CHECK_EQUAL(lua.top(), 0);
 }
 

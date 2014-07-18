@@ -3,6 +3,7 @@
 
 #include <lua.hpp>
 #include <assert.h>
+#include <ctype.h>
 
 #include <functional>
 #include <stdexcept>
@@ -847,6 +848,9 @@ public:
     template<typename... Args>
     Class_<Class>& init();
 
+    template<typename T>
+    Class_<Class>& attribute(std::string name, T Class::*mp);
+
     operator Table() && { return std::move(mod); }
 
     Table getMetaTable();
@@ -1000,7 +1004,8 @@ struct MemberFunctionTransformer {
     typedef typename MemberFunctionTransformer<
         MemberFuncPtr, ThisType, size-1,
         typename boost::mpl::pop_front<PARALIST>::type,
-        typename boost::mpl::at_c<PARALIST, 0>::type, Args...>::type type;
+        Args...,
+        typename boost::mpl::at_c<PARALIST, 0>::type>::type type;
 };
 
 template<typename MemberFuncPtr, typename ThisType,
@@ -1008,6 +1013,26 @@ template<typename MemberFuncPtr, typename ThisType,
 struct MemberFunctionTransformer<MemberFuncPtr, ThisType, 0, PARALIST, Args...> {
     typedef MemberFunctionWrapper<MemberFuncPtr, ThisType, Args...> type;
 };
+
+
+template<typename Class>
+template<typename T>
+Class_<Class>& Class_<Class>::attribute(std::string name, T Class::*mp)
+{
+    name[0] = toupper(name[0]);
+    mod[std::string("get") + name] = state.newCallable([mp](UserData&& ud) {
+        auto& ref = ud.to<Class>();
+        return ref.*mp;
+    });
+    mod[std::string("set") + name] = state.newCallable(
+        [mp](UserData&& ud, const T& val) {
+            auto& ref = ud.to<Class>();
+            ref.*mp = val;
+            return std::move(ud);
+        }
+    );
+    return *this;
+}
 
 template<typename Class>
 template<typename T>
@@ -1287,7 +1312,7 @@ struct CanonicalWrapper {
     CanonicalWrapper(Callable callable) : callable(callable) { }
     typename boost::function_types::result_type<
         typename ToLambda<Callable>::lambda_t>::type
-    operator()(State&, Args... args) {
+    operator()(State&, Args&&... args) {
         return callable(std::forward<Args>(args)...);
     }
 };
@@ -1296,8 +1321,9 @@ template<typename Callable, int size, typename PARALIST, typename... Args>
 struct CanonicalTransformer {
     typedef typename CanonicalTransformer<Callable, size-1,
                 typename boost::mpl::pop_front<PARALIST>::type,
-                typename boost::mpl::at_c<PARALIST,0>::type,
-                Args...>::type type;
+                Args...,
+                typename boost::mpl::at_c<PARALIST,0>::type
+                >::type type;
 };
 
 template<typename Callable, typename PARALIST, typename... Args>
