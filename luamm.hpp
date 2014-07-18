@@ -826,8 +826,8 @@ class Class_ {
     std::string name;
     State& state;
     Table mod;
-    std::string uuid;
 public:
+    const std::string uuid;
     template<typename T>
     typename std::enable_if<
         std::is_member_function_pointer<T>::value, Class_<Class>&>::type
@@ -1472,6 +1472,6 @@ Closure State::newCallable(F func, int extra_upvalues)
 } // end namespace
 
 #define LUAMM_MODULE(name, state) extern "C" int luaopen_##name(lua_State *state)
-#define LUAMM_MODULE_RETURN(state, tab) state[1] = tab; st.settop(1); return 1;
+#define LUAMM_MODULE_RETURN(state, tab) state[1] = tab; state.settop(1); return 1;
 
 #endif
