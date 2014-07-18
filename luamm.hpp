@@ -104,10 +104,9 @@ class Variant  {
 private:
     KeyStore index;
     Container state;
-    bool autoclean;
 public:
-    Variant(Container st, const Key& i, bool autoclean = false)
-        : index(i), state(st), autoclean(autoclean)  {}
+    Variant(Container st, const Key& i)
+        : index(i), state(st) {}
 
     template<typename T>
     T to() const {
@@ -115,12 +114,15 @@ public:
     }
 
     template<typename T>
-    operator T() const  {
+    operator T() && {
         T o = to<T>();
-        if (autoclean) {
-            AutoCleaner<Container, KeyStore>::template clean<T>(state, index);
-        }
+        AutoCleaner<Container, KeyStore>::template clean<T>(state, index);
         return o;
+    }
+
+    template<typename T>
+    operator T() & {
+        return to<T>();
     }
 
     template<typename T>
@@ -156,15 +158,6 @@ public:
         }
         return true;
     }
-};
-
-/* rip out the corresponding value within lua stack after a reading
- * iff it is a value-type variable
- */
-class AutoVariant : public Variant<lua_State*, int> {
-public:
-    AutoVariant(lua_State* st, int i)
-        : Variant<lua_State*,int>(st, i, true) {}
 };
 
 
@@ -501,7 +494,7 @@ struct Closure : public HasMetaTable<Closure> {
                 void,
                 typename std::conditional<rvals == 1,
                     // true => auto cleanable variant
-                    AutoVariant,
+                    Variant<lua_State*, int>,
                     typename GenTuple<rvals, Variant<lua_State*,int>>::type
                 >::type
             >::type type;
