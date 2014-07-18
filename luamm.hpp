@@ -17,7 +17,9 @@
 #include <boost/mpl/size.hpp>
 #include <boost/mpl/vector.hpp>
 #include <boost/preprocessor.hpp>
-#include <iostream>
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
 
 namespace luamm {
 
@@ -830,6 +832,7 @@ class Class_ {
     std::string name;
     State& state;
     Table mod;
+    std::string uuid;
 public:
     template<typename T>
     typename std::enable_if<
@@ -842,7 +845,8 @@ public:
     def(const std::string& method, T callable);
 
     Class_(Class_&& o)
-        : name(std::move(o.name)), state(o.state), mod(std::move(o.mod)) {}
+        : name(std::move(o.name)), state(o.state),
+          mod(std::move(o.mod)), uuid(std::move(o.uuid)) {}
 
     // enable custom constructor
     template<typename... Args>
@@ -1071,13 +1075,12 @@ Table Class_<Class>::getMetaTable() {
     }
 }
 
-#define METATABLE_KEY (std::string((const char*)mod["modname"]) + "_LUAMM")
 
 template<typename Class>
 template<typename... Args>
 Class_<Class>& Class_<Class>::init()
 {
-    std::string mkey = METATABLE_KEY;
+    std::string mkey = uuid;
     getMetaTable()["__call"] = state.newCallable(
         [mkey](State& st, Table&& tab, Args&&... args) {
             UserData ud = st.newUserData<Class>(std::forward<Args>(args)...);
@@ -1090,14 +1093,14 @@ Class_<Class>& Class_<Class>::init()
 
 template<typename Class>
 Class_<Class>::Class_(const std::string& name, State& state)
-    : name(name), state(state), mod(state.newTable()) {
+    : name(name), state(state), mod(state.newTable()),
+        uuid(boost::uuids::to_string(boost::uuids::random_generator()())) {
     // initialize metatable
-    mod["modname"] = name;
+    mod["className"] = name;
     mod["__index"] = mod;
-    state.registry()[METATABLE_KEY] = mod;
+    state.registry()[uuid] = mod;
 }
 
-#undef METATABLE_KEY
 
 inline State::State(const State& o) : ptr_(o.ptr_) {}
 

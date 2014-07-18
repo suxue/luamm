@@ -334,7 +334,7 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
             lua.class_<Hello>("hello")
             .def("add", [](int i, int j) { return i+j; })
         );
-        BOOST_CHECK_EQUAL((const char*)mod["modname"], "hello");
+        BOOST_CHECK_EQUAL((const char*)mod["className"], "hello");
         Closure add = mod["add"];
         BOOST_CHECK_EQUAL(Number(add(1,2)), 3);
     }
@@ -390,6 +390,7 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
 
     {
         // long parameter list
+        auto scope = lua.newScope();
         Closure cl = lua.newCallable([](int a, int b, int c, int d, int e) {
             return make_tuple(e, d, c, b, a);
         });
