@@ -20,7 +20,7 @@ class Path : public UserData {
     public:
         Path(UserData&& u)
             : UserData(forward<UserData>(u)), path_ptr(&to<fs::path>()) {
-            check(path_registry_key);
+            checkmetatable(path_registry_key);
         }
         fs::path& data() { return *path_ptr; }
         operator fs::path&() { return data(); }
@@ -31,7 +31,7 @@ class FileStatus: public UserData {
     public:
         FileStatus(UserData&& u)
             : UserData(forward<UserData>(u)), fstat_ptr(&to<fs::file_status>()) {
-            check(file_status_registry_key);
+            checkmetatable(file_status_registry_key);
         }
         fs::file_status& data() { return *fstat_ptr; }
         operator fs::file_status&() { return data(); }
@@ -42,13 +42,13 @@ class FileStatus: public UserData {
  */
 UserData& make_path(State& st, UserData& path)
 {
-    path.set(path_registry_key);
+    path.setmetatable(path_registry_key);
     return path;
 }
 
 UserData& make_file_status(State& st, UserData& file_status)
 {
-    file_status.set(file_status_registry_key);
+    file_status.setmetatable(file_status_registry_key);
     return file_status;
 }
 
@@ -69,7 +69,7 @@ namespace metatable {
     }
 
     Closure path_index(State& st, Path&& self, const char *key) {
-        return  Table(self.get())[key];
+        return  Table(self.getmetatable())[key];
     }
 
     UserData path_root_name(State& st, Path&& self) {

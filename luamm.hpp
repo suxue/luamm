@@ -46,7 +46,7 @@
 namespace luamm {
 
     // utility classes and functions
-    namespace {
+    namespace detail {
         class AutoPopper {
             lua_State* state;
             int n;
@@ -60,6 +60,32 @@ namespace luamm {
                 lua_pop(state, 1);
             }
         }
+
+        // type trait distinguishes value(primitive) and non-value lua types
+        // value == 0, iff non-value type, Closure, Table etc
+        // value == 1, iff value type Number, string, boolean, Nil etc
+        template<typename T>
+        struct StackVariable {
+            enum { value = 0 };
+        };
+
+        template<typename Container, typename KeyStore>
+        struct AutoCleaner {
+            template<typename T>
+            static void clean(const Container& _, const KeyStore& k) {}
+        };
+
+        template<>
+        struct AutoCleaner<lua_State*,int> {
+            template<typename T>
+            static void clean(lua_State* state, int index) {
+                if (lua_gettop(state) == index &&
+                        !StackVariable<T>::value) {
+                    lua_pop(state, 1);
+                }
+            }
+        };
+
     }
 
 
@@ -70,13 +96,6 @@ typedef lua_CFunction CFunction;
 /* primitive lua typs */
 class Nil {};
 
-/* type trait distinguishes value(primitive) and non-value lua types */
-// value == 0, iff non-value type, Closure, Table etc
-// value == 1, iff value type Number, string, boolean, Nil etc
-template<typename T>
-struct StackVariable {
-    enum { value = 0 };
-};
 
 /* Base class for errors */
 struct RuntimeError : std::runtime_error {
@@ -103,22 +122,6 @@ struct KeySetter;
 template<typename Container, typename Key>
 struct KeyTyper;
 
-template<typename Container, typename KeyStore>
-struct AutoCleaner {
-    template<typename T>
-    static void clean(const Container& _, const KeyStore& k) {}
-};
-
-template<>
-struct AutoCleaner<lua_State*,int> {
-    template<typename T>
-    static void clean(lua_State* state, int index) {
-        if (lua_gettop(state) == index &&
-                !StackVariable<T>::value) {
-            lua_pop(state, 1);
-        }
-    }
-};
 
 /* router class for read/write/update a lua variable */
 template<typename Container, typename Key, typename KeyStore = Key>
@@ -138,7 +141,7 @@ public:
     template<typename T>
     operator T() && {
         T o = to<T>();
-        AutoCleaner<Container, KeyStore>::template clean<T>(state, index);
+        detail::AutoCleaner<Container, KeyStore>::template clean<T>(state, index);
         return o;
     }
 
@@ -192,8 +195,8 @@ struct Table {
     template<typename T>
     Variant<Table*, T, typename VarPusher<T>::type> operator[](const T& k);
 
-    void set(const Table& metatab);
-    Table get();
+    void setmetatable(const Table& metatab);
+    Table getmetatable();
 
     int length() {
         return lua_rawlen(state, index);
@@ -213,26 +216,28 @@ struct Table {
         o.index = 0;
     }
 
-    bool hasMetaTable() {
+    bool hasmetatable() {
         return lua_getmetatable(state, index) ? true : false;
     }
 private:
     Table(const Table&);
 };
 
-/* interface that lua variable types which can have corresponding metatable
- */
-template<typename Sub>
-struct HasMetaTable {
-    void set(const Table& metatab);
-    void set(const std::string& regkey);
-    void check(const std::string& regkey);
-    Table get();
-    bool hasMetaTable() {
-        Sub* this_ = static_cast<Sub*>(this);
-        return lua_getmetatable(this_->state, this_->index) ? true : false;
-    }
-};
+namespace detail {
+    /* interface that lua variable types which can have corresponding metatable
+     */
+    template<typename Sub>
+    struct HasMetaTable {
+        void setmetatable(const Table& metatab);
+        void setmetatable(const std::string& regkey);
+        void checkmetatable(const std::string& regkey);
+        Table getmetatable();
+        bool hasmetatable() {
+            Sub* this_ = static_cast<Sub*>(this);
+            return lua_getmetatable(this_->state, this_->index)?true:false;
+        }
+    };
+}
 
 /* a closure in lua is a tuple of
  * #1, a function pointer who follows the lua cfunction signature
@@ -250,7 +255,7 @@ public:
 };
 
 
-struct UserData : HasMetaTable<UserData> {
+struct UserData : detail::HasMetaTable<UserData> {
     lua_State* state;
     int index;
     UserData(lua_State* st, int index)
@@ -270,14 +275,16 @@ private:
     UserData(const UserData&);
 };
 
-template<>
-struct StackVariable<UserData> {
-    enum { value = 1 };
-};
+
+namespace detail {
+    template<>
+    struct StackVariable<UserData> {
+        enum { value = 1 };
+    };
+}
 
 template<typename LuaValue>
 struct VarProxy;
-
 
 struct VarBase {
     lua_State *state;
@@ -375,82 +382,90 @@ struct VarProxy<Number> : VarBase  {
 };
 
 
-/* all in/out lua variable types that expected to be converted to/from
- * automatically (as a function arguments or return value)
- * should be placed in this mpl vector.
- */
-typedef boost::mpl::vector<
-            std::string,
-            const char*,
-            Number,
-            CClosure,
-            Table,
-            UserData,
-            Nil
-        > varproxies;
-struct PlaceHolder {};
+namespace detail {
+    /* all in/out lua variable types that expected to be converted to/from
+     * automatically (as a function arguments or return value)
+     * should be placed in this mpl vector.
+     */
+    typedef boost::mpl::vector<
+                std::string,
+                const char*,
+                Number,
+                CClosure,
+                Table,
+                UserData,
+                Nil
+            > varproxies;
+    struct PlaceHolder {};
 
-/* decide which type in varproxies provide the matching proxy for typename
- * Var
- */
-template<typename Proxy, typename Var>
-struct PredPush {
-    typedef struct { char _[2]; } two;
-    typedef char one;
+    /* decide which type in varproxies provide the matching proxy for typename
+     * Var
+     */
+    template<typename Proxy, typename Var>
+    struct PredPush {
+        typedef struct { char _[2]; } two;
+        typedef char one;
 
-    template<typename P, typename V>
-    static one test(
-            decltype(
-                std::declval<VarProxy<P>>().push(std::declval<V>())));
-
-    template<typename P, typename V>
-    static two test(...);
-
-    typedef boost::mpl::bool_<sizeof(test<Proxy, Var>(true)) == 1> type;
-};
-
-
-template<typename Proxy, typename Var>
-struct PredGet {
-    typedef struct { char _[2]; } two;
-    typedef char one;
-
-    template<typename P, typename V>
-    static one test(
-        typename std::conditional<
-            std::is_convertible<
+        template<typename P, typename V>
+        static one test(
                 decltype(
-                    VarBase(static_cast<lua_State*>(nullptr))
-                    .to<P>().get(
-                        static_cast<int>(2),
-                        std::declval<bool&>()
-                    )
-                ),
-                V
-            >::value,
-            void *,
-            double
-        >::type
-    );
+                    std::declval<VarProxy<P>>().push(std::declval<V>())));
 
-    template<typename P, typename V>
-    static two test(...);
+        template<typename P, typename V>
+        static two test(...);
 
-    typedef boost::mpl::bool_<sizeof(test<Proxy, Var>(nullptr)) == 1> type;
-};
+        typedef boost::mpl::bool_<sizeof(test<Proxy, Var>(true)) == 1> type;
+    };
 
-template<template<class, class> class Pred, typename T>
-struct SelectImpl
-{
-    typedef typename boost::mpl::fold<
-        varproxies,
-        PlaceHolder,
-        // _1 is state, _2 is current item
-        boost::mpl::if_<Pred<boost::mpl::_2, T>,
-                        boost::mpl::_2, // select current item
-                        boost::mpl::_1> // keep last item
-    >::type type;
-};
+    template<typename Proxy, typename Var>
+    struct PredGet {
+        typedef struct { char _[2]; } two;
+        typedef char one;
+
+        template<typename P, typename V>
+        static one test(
+            typename std::conditional<
+                std::is_convertible<
+                    decltype(
+                        VarBase(static_cast<lua_State*>(nullptr))
+                        .to<P>().get(
+                            static_cast<int>(2),
+                            std::declval<bool&>()
+                        )
+                    ),
+                    V
+                >::value,
+                void *,
+                double
+            >::type
+        );
+
+        template<typename P, typename V>
+        static two test(...);
+
+        typedef boost::mpl::bool_<sizeof(test<Proxy, Var>(nullptr)) == 1> type;
+    };
+
+    template<template<class, class> class Pred, typename T>
+    struct SelectImpl
+    {
+        typedef typename boost::mpl::fold<
+            detail::varproxies,
+            detail::PlaceHolder,
+            // _1 is state, _2 is current item
+            boost::mpl::if_<Pred<boost::mpl::_2, T>,
+                            boost::mpl::_2, // select current item
+                            boost::mpl::_1> // keep last item
+        >::type type;
+    };
+
+    template<typename Exception>
+    struct Guard {
+        bool status;
+        Guard() : status(false) {}
+        ~Guard() { if (!status) throw Exception(); }
+    };
+}
 
 template<>
 struct VarProxy<Nil> : VarBase {
@@ -475,29 +490,24 @@ struct VarProxy<bool> : VarBase {
     enum { tid = LUA_TBOOLEAN};
 };
 
-template<typename Exception>
-struct Guard {
-    bool status;
-    Guard() : status(false) {}
-    ~Guard() { if (!status) throw Exception(); }
-};
-
 struct VarPushError : RuntimeError { VarPushError() : RuntimeError("") {} };
 
-/* generate a tuple to simulate multiple return value in c++*/
-template<int I, typename Arg,  typename... Args>
-struct GenTuple  {
-    typedef typename GenTuple<I-1, Arg, Args..., Arg>::type type;
-};
+namespace detail {
+    /* generate a tuple to simulate multiple return value in c++*/
+    template<int I, typename Arg,  typename... Args>
+    struct GenTuple  {
+        typedef typename GenTuple<I-1, Arg, Args..., Arg>::type type;
+    };
 
-template<typename Arg,  typename... Args>
-struct GenTuple<0, Arg, Args...> {
-    typedef std::tuple<Args...> type;
-};
+    template<typename Arg,  typename... Args>
+    struct GenTuple<0, Arg, Args...> {
+        typedef std::tuple<Args...> type;
+    };
+}
 
 /* a callable representing a lua variable exitsing in the stack,
  * either a c function or a lua function  */
-struct Closure : public HasMetaTable<Closure> {
+struct Closure : public detail::HasMetaTable<Closure> {
     lua_State* state;
     int index;
     Closure(lua_State* st, int index) : state(st), index(lua_absindex(st, index)) {}
@@ -517,7 +527,7 @@ struct Closure : public HasMetaTable<Closure> {
                 typename std::conditional<rvals == 1,
                     // true => auto cleanable variant
                     Variant<lua_State*, int>,
-                    typename GenTuple<rvals, Variant<lua_State*,int>>::type
+                    typename detail::GenTuple<rvals, Variant<lua_State*,int>>::type
                 >::type
             >::type type;
     };
@@ -542,7 +552,7 @@ struct Closure : public HasMetaTable<Closure> {
     template<int rvals, int count, typename T, typename... Args>
     typename Rvals<rvals>::type __call__(T&& a, Args&&... args) {
         {
-            Guard<VarPushError> gd;
+            detail::Guard<VarPushError> gd;
             gd.status = VarPusher<T>::push(state, std::forward<T>(a));
         }
         return this->__call__<rvals, count+1, Args...>(std::forward<Args>(args)...);
@@ -589,10 +599,12 @@ BOOST_PP_REPEAT_FROM_TO(2, LUAMM_MAX_RETVALUES, LUAMM_TMPL,)
 #undef LUAMM_ARGS
 #undef LUAMM_TMPL
 
-template<>
-struct StackVariable<Closure> {
-    enum { value = 1 };
-};
+namespace detail {
+    template<>
+    struct StackVariable<Closure> {
+        enum { value = 1 };
+    };
+}
 
 template<>
 struct VarProxy<Closure> : VarBase {
@@ -613,10 +625,12 @@ struct VarProxy<Closure> : VarBase {
     enum { tid = LUA_TFUNCTION };
 };
 
-template<>
-struct StackVariable<Table> {
-    enum { value = 1 };
-};
+namespace detail {
+    template<>
+    struct StackVariable<Table> {
+        enum { value = 1 };
+    };
+}
 
 struct KeyGetError : RuntimeError { KeyGetError() : RuntimeError("") {} };
 struct KeyPutError : RuntimeError { KeyPutError() : RuntimeError("") {} };
@@ -641,7 +655,8 @@ struct VarProxy<Table> : VarBase {
     enum { tid = LUA_TTABLE };
 };
 
-namespace {
+
+namespace detail {
     template<typename T>
     struct VarDispatcher {
 
@@ -664,12 +679,13 @@ namespace {
 
 template<typename T>
 struct VarPusher {
-    typedef typename std::conditional<VarDispatcher<T>::use_indirect_push,
-                 typename SelectImpl<PredPush, T>::type,
+    typedef typename std::conditional<
+                 detail::VarDispatcher<T>::use_indirect_push,
+                 typename detail::SelectImpl<detail::PredPush, T>::type,
                  T
             >::type type;
     static bool push(lua_State* st, const T& v) {
-        static_assert( ! std::is_same<PlaceHolder, type>::value,
+        static_assert( ! std::is_same<detail::PlaceHolder, type>::value,
                 "no push() implmentation can be selected for T" );
         return VarBase(st).to<type>().push(v);
     }
@@ -677,12 +693,13 @@ struct VarPusher {
 
 template<typename T>
 struct VarGetter {
-    typedef typename std::conditional<VarDispatcher<T>::use_indirect_get,
-                 typename SelectImpl<PredGet, T>::type,
+    typedef typename std::conditional<
+                 detail::VarDispatcher<T>::use_indirect_get,
+                 typename detail::SelectImpl<detail::PredGet, T>::type,
                  T
             >::type type;
     static T get(lua_State* st, int index, bool& success) {
-        static_assert( ! std::is_same<PlaceHolder, type>::value,
+        static_assert( ! std::is_same<detail::PlaceHolder, type>::value,
                 "no get() implmentation can be selected for T" );
         return VarBase(st).to<type>().get(index, success);
     }
@@ -694,8 +711,8 @@ struct KeyGetter<Closure*, int, Var> {
     static Var get(Closure* cl, int key) {
         auto p = lua_getupvalue(cl->state, cl->index, key);
         if (!p) { throw VarGetError(); }
-        Guard<VarGetError> gd;
-        AutoPopper ap(cl->state, 1 - StackVariable<Var>::value);
+        detail::Guard<VarGetError> gd;
+        detail::AutoPopper ap(cl->state, 1 - detail::StackVariable<Var>::value);
         return VarGetter<Var>::get(cl->state, -1, gd.status);
     }
 };
@@ -705,7 +722,7 @@ struct KeyTyper<Closure*, int> {
     static int type(Closure* cl, int key) {
         auto p = lua_getupvalue(cl->state, cl->index, key);
         if (!p) { throw VarGetError(); }
-        AutoPopper ap(cl->state);
+        detail::AutoPopper ap(cl->state);
         return lua_type(cl->state, -1);
     }
 };
@@ -714,7 +731,7 @@ template<typename Var>
 struct KeySetter<Closure*, int, Var> {
     static void set(Closure* cl, int key, const Var& nv) {
         {
-            Guard<VarPushError> gd;
+            detail::Guard<VarPushError> gd;
             gd.status = VarPusher<Var>::push(cl->state, nv);
         }
         if (!lua_setupvalue(cl->state, cl->index, key)) {
@@ -729,7 +746,7 @@ struct KeySetter<Closure*, int, Var> {
 template<typename Var>
 struct KeyGetter<lua_State*, int, Var> {
     static Var get(lua_State* container, int key) {
-        Guard<VarGetError> gd;
+        detail::Guard<VarGetError> gd;
         return VarGetter<Var>::get(container, key, gd.status);
     }
 };
@@ -738,10 +755,10 @@ template<typename Var>
 struct KeySetter<lua_State*, int, Var> {
     static void set(lua_State* container, int key, const Var& nv) {
         {
-            Guard<VarPushError> gd;
+            detail::Guard<VarPushError> gd;
             gd.status = VarPusher<Var>::push(container, nv);
         }
-        AutoPopper ap(container);
+        detail::AutoPopper ap(container);
         lua_copy(container, -1, key);
     }
 };
@@ -762,8 +779,8 @@ template<typename Var>
 struct KeyGetter<lua_State*, std::string, Var> {
     static Var get(lua_State* container, const std::string& key) {
         lua_getglobal(container, key.c_str());
-        Guard<VarGetError> gd;
-        AutoPopper ap(container, 1 - StackVariable<Var>::value);
+        detail::Guard<VarGetError> gd;
+        detail::AutoPopper ap(container, 1 - detail::StackVariable<Var>::value);
         return VarGetter<Var>::get(container, -1, gd.status);
     }
 };
@@ -772,7 +789,7 @@ template<>
 struct KeyTyper<lua_State*, std::string> {
     static int type(lua_State* st, const std::string& k) {
         lua_getglobal(st, k.c_str());
-        AutoPopper ap(st);
+        detail::AutoPopper ap(st);
         return lua_type(st, -1);
     }
 };
@@ -781,7 +798,7 @@ template<typename Var>
 struct KeySetter<lua_State*, std::string, Var> {
     static void set(lua_State* container, const std::string& key, const Var& nv) {
         {
-            Guard<VarPushError> gd;
+            detail::Guard<VarPushError> gd;
             gd.status = VarPusher<Var>::push(container, nv);
         }
         lua_setglobal(container, key.c_str());
@@ -793,11 +810,11 @@ template<typename Key>
 struct KeyTyper<Table*, Key> {
     static int type(Table *t, const Key& k) {
         {
-            Guard<VarPushError> gd;
+            detail::Guard<VarPushError> gd;
             gd.status = VarPusher<Key>::push(t->state, k);
         }
         lua_gettable(t->state, t->index);
-        AutoPopper ap(t->state);
+        detail::AutoPopper ap(t->state);
         return lua_type(t->state, -1);
     }
 };
@@ -807,7 +824,7 @@ struct KeyGetter<Table*, Key, Var> {
     static Var get(Table* container, const Key& key) {
         {
             // push key
-            Guard<VarPushError> gd;
+            detail::Guard<VarPushError> gd;
             gd.status = VarPusher<Key>::push(container->state, key);
         }
 
@@ -815,8 +832,8 @@ struct KeyGetter<Table*, Key, Var> {
         lua_gettable(container->state, container->index);
 
         // return reteieved value
-        Guard<VarGetError> gd;
-        AutoPopper ap(container->state, 1 - StackVariable<Var>::value);
+        detail::Guard<VarGetError> gd;
+        detail::AutoPopper ap(container->state, 1 - detail::StackVariable<Var>::value);
         return VarGetter<Var>::get(container->state, -1, gd.status);
     }
 };
@@ -826,18 +843,19 @@ struct KeySetter<Table*, Key, Var> {
     static void set(Table *container, const Key& key, const Var& nv) {
         {
             // push key
-            Guard<VarPushError> gd;
+            detail::Guard<VarPushError> gd;
             gd.status = VarPusher<Key>::push(container->state, key);
         }
         {
             // push key
-            Guard<VarPushError> gd;
+            detail::Guard<VarPushError> gd;
             gd.status = VarPusher<Var>::push(container->state, nv);
         }
         // access table
         lua_settable(container->state, container->index);
     }
 };
+
 
 class State;
 template<typename Class>
@@ -847,8 +865,14 @@ class Class_ {
     std::string name;
     State& state;
     Table mod;
-public:
+    Table mtab;
     const std::string uuid;
+    bool hasAttribute{false};
+public:
+    enum Attributes  {
+        Read = 1,
+        Write = 2
+    };
     template<typename T>
     typename std::enable_if<
         std::is_member_function_pointer<T>::value, Class_<Class>&>::type
@@ -859,20 +883,17 @@ public:
         !std::is_member_function_pointer<T>::value, Class_<Class>&>::type
     def(const std::string& method, T callable);
 
-    Class_(Class_&& o)
-        : name(std::move(o.name)), state(o.state),
-          mod(std::move(o.mod)), uuid(std::move(o.uuid)) {}
-
     // enable custom constructor
     template<typename... Args>
     Class_<Class>& init();
 
     template<typename T>
-    Class_<Class>& attribute(std::string name, T Class::*mp);
+    Class_<Class>& attribute(const std::string& name, T Class::*mp,
+                             unsigned perm = Read | Write);
 
     operator Table() && { return std::move(mod); }
 
-    Table getMetaTable();
+    Table getmetatable();
 };
 
 
@@ -1005,6 +1026,7 @@ public:
     }
 };
 
+namespace detail {
 template<typename Data, typename... Args>
 struct MemberFunctionWrapper {
     typedef typename Data::first MemberFuncPtr;
@@ -1035,24 +1057,31 @@ template<template<class, class...> class T, typename Data,
 struct ParameterListTransformer<T, Data, ParaList, 0, Args...> {
     typedef T<Data, Args...> type;
 };
+} // end namespace detail
 
 
 template<typename Class>
 template<typename T>
-Class_<Class>& Class_<Class>::attribute(std::string name, T Class::*mp)
+Class_<Class>& Class_<Class>::attribute(const std::string& name,
+                                        T Class::*mp,
+                                        unsigned perm)
 {
-    name[0] = toupper(name[0]);
-    mod[std::string("get") + name] = state.newCallable([mp](UserData&& ud) {
-        auto& ref = ud.to<Class>();
-        return ref.*mp;
-    });
-    mod[std::string("set") + name] = state.newCallable(
-        [mp](UserData&& ud, const T& val) {
+    hasAttribute = true;
+    if (perm & Read) {
+        mtab[std::string("get_") + name] = state.newCallable([mp](UserData&& ud) {
             auto& ref = ud.to<Class>();
-            ref.*mp = val;
-            return std::move(ud);
-        }
-    );
+            return ref.*mp;
+        });
+    }
+    if (perm & Write) {
+        mtab[std::string("set_") + name] = state.newCallable(
+            [mp](UserData&& ud, const T& val) {
+                auto& ref = ud.to<Class>();
+                ref.*mp = val;
+                return std::move(ud);
+            }
+        );
+    }
     return *this;
 }
 
@@ -1067,11 +1096,11 @@ Class_<Class>::def(const std::string& method, T method_ptr)
     typedef typename std::remove_reference<
         typename boost::mpl::at_c<full_para_t, 0>::type>::type this_t;
     typedef typename boost::mpl::pop_front<full_para_t>::type para_t;
-    typedef typename ParameterListTransformer<
-                MemberFunctionWrapper,
+    typedef typename detail::ParameterListTransformer<
+                detail::MemberFunctionWrapper,
                 boost::mpl::pair<T, this_t>,
                 para_t>::type Wrapper;
-    mod[method] = state.newCallable(Wrapper(method_ptr));
+    mtab[method] = state.newCallable(Wrapper(method_ptr));
     return *this;
 }
 
@@ -1081,46 +1110,38 @@ typename std::enable_if<
     !std::is_member_function_pointer<T>::value, Class_<Class>&>::type
 Class_<Class>::def(const std::string& method, T callable)
 {
-    mod[method] = state.newCallable(callable);
+    mtab[method] = state.newCallable(callable);
     return *this;
 }
-
-template<typename Class>
-Table Class_<Class>::getMetaTable() {
-    if (mod.hasMetaTable()) {
-        return mod.get();
-    } else {
-        mod.set(state.newTable());
-        return mod.get();
-    }
-}
-
 
 template<typename Class>
 template<typename... Args>
 Class_<Class>& Class_<Class>::init()
 {
     std::string mkey = uuid;
-    getMetaTable()["__call"] = state.newCallable(
+    Table constructor = state.newTable();
+    constructor["__call"] = state.newCallable(
         [mkey](State& st, Table&& tab, Args&&... args) {
             UserData ud = st.newUserData<Class>(std::forward<Args>(args)...);
-            ud.set(mkey);
+            ud.setmetatable(mkey);
             return ud;
         }
     );
+    constructor["__metatable"] = Nil();
+    mod.setmetatable(constructor);
     return *this;
 }
 
 template<typename Class>
 Class_<Class>::Class_(const std::string& name, State& state)
-    : name(name), state(state), mod(state.newTable()),
+    : name(name), state(state), mod(state.newTable()), mtab(state.newTable()),
         uuid(boost::uuids::to_string(boost::uuids::random_generator()())) {
     // initialize metatable
     mod["className"] = name;
-    mod["__index"] = mod;
-    state.registry()[uuid] = mod;
+    mtab["__metatable"] = Nil();
+    mtab["__index"] = mtab;
+    state.registry()[uuid] = mtab;
 }
-
 
 inline State::State(const State& o) : ptr_(o.ptr_) {}
 
@@ -1155,15 +1176,15 @@ inline Table::Table(lua_State* st, int i)
 
 
 inline Table::~Table() {
-    cleanup(state, index);
+    detail::cleanup(state, index);
 }
 
 inline UserData::~UserData() {
-    cleanup(state, index);
+    detail::cleanup(state, index);
 }
 
 inline Closure::~Closure() {
-    cleanup(state, index);
+    detail::cleanup(state, index);
 }
 
 template<typename T>
@@ -1171,7 +1192,7 @@ Variant<Table*, T, typename VarPusher<T>::type> Table::operator[](const T& k) {
     return  Variant<Table*, T, typename VarPusher<T>::type>(this, k);
 }
 
-inline void Table::set(const Table& metatab) {
+inline void Table::setmetatable(const Table& metatab) {
     if (!VarPusher<Table>::push(state, metatab)) {
         throw RuntimeError("cannot push metatable");
     }
@@ -1182,7 +1203,7 @@ struct NoMetatableError : public RuntimeError {
     NoMetatableError() : RuntimeError("") {}
 };
 
-inline Table Table::get() {
+inline Table Table::getmetatable() {
     if (!lua_getmetatable(state, index)) {
         throw NoMetatableError();
     }
@@ -1190,17 +1211,17 @@ inline Table Table::get() {
 }
 
 template<typename Sub>
-void HasMetaTable<Sub>::set(const Table& metatab) {
+void detail::HasMetaTable<Sub>::setmetatable(const Table& metatab) {
     Sub* p = static_cast<Sub*>(this);
     {
-        Guard<VarPushError> gd;
+        detail::Guard<VarPushError> gd;
         gd.status = VarPusher<Table>::push(p->state, metatab);
     }
     lua_setmetatable(p->state, p->index);
 }
 
 template<typename Sub>
-void HasMetaTable<Sub>::set(const std::string& registry_entry) {
+void detail::HasMetaTable<Sub>::setmetatable(const std::string& registry_entry) {
     Sub* p = static_cast<Sub*>(this);
     lua_pushnil(p->state);
     lua_copy(p->state, p->index, -1);
@@ -1208,11 +1229,11 @@ void HasMetaTable<Sub>::set(const std::string& registry_entry) {
 }
 
 template<typename Sub>
-void HasMetaTable<Sub>::check(const std::string& registry_entry) {
+void detail::HasMetaTable<Sub>::checkmetatable(const std::string& registry_entry) {
     Sub* p = static_cast<Sub*>(this);
     State st(p->state);
     try {
-        Table mtab = get();
+        Table mtab = getmetatable();
         Table target_mtab = st.registry()[registry_entry];
         if (target_mtab != mtab) {
             st.error(std::string("expect a userdata (") + registry_entry + ")");
@@ -1223,7 +1244,7 @@ void HasMetaTable<Sub>::check(const std::string& registry_entry) {
 }
 
 template<typename Sub>
-Table HasMetaTable<Sub>::get() {
+Table detail::HasMetaTable<Sub>::getmetatable() {
     Sub* p = static_cast<Sub*>(this);
     if (!lua_getmetatable(p->state, p->index)) {
         throw NoMetatableError();
@@ -1252,7 +1273,8 @@ struct TypeChecker {
 
 template<typename T>
 struct IsSingleReturnValue {
-    enum { value = !std::is_same<typename VarPusher<T>::type, PlaceHolder>::value };
+    enum { value = !std::is_same<typename VarPusher<T>::type,
+                                 detail::PlaceHolder>::value };
 };
 
 template<typename T>
@@ -1329,21 +1351,23 @@ struct IsCanonicalCallable {
                    typename ToLambda<Callable>::para_t, 0>::type>::value };
 };
 
-template<typename Callable, typename... Args>
-struct CanonicalWrapper {
-    Callable callable;
-    CanonicalWrapper(Callable callable) : callable(callable) { }
-    typename boost::function_types::result_type<
-        typename ToLambda<Callable>::lambda_t>::type
-    operator()(State&, Args&&... args) {
-        return callable(std::forward<Args>(args)...);
-    }
-};
+namespace detail {
+    template<typename Callable, typename... Args>
+    struct CanonicalWrapper {
+        Callable callable;
+        CanonicalWrapper(Callable callable) : callable(callable) { }
+        typename boost::function_types::result_type<
+            typename ToLambda<Callable>::lambda_t>::type
+        operator()(State&, Args&&... args) {
+            return callable(std::forward<Args>(args)...);
+        }
+    };
+}
 
 template<typename Callable>
 struct CanonicalCallable {
     typedef typename ToLambda<Callable>::para_t para_t;
-    typedef typename ParameterListTransformer<CanonicalWrapper,
+    typedef typename detail::ParameterListTransformer<detail::CanonicalWrapper,
                                               Callable,
                                               para_t>::type type;
 };
@@ -1394,9 +1418,9 @@ struct CallableCall {
 };
 
 template<typename C>struct  CallLambda<C, 1> {
-    static typename CallableCall<C>::result_t call(C& func, State& st, int offset) {
-        return func(st);
-    }}; // special case, c function has no argument
+static typename CallableCall<C>::result_t call(C& func, State& st, int offset) {
+    return func(st);
+}}; // special case, c function has no argument
 
 #ifndef LUAMM_LAMBDA_PARANUMBER
 #define LUAMM_LAMBDA_PARANUMBER 15
@@ -1418,8 +1442,8 @@ BOOST_PP_REPEAT_FROM_TO(2, LUAMM_LAMBDA_PARANUMBER, LUAMM_TEMPL,)
 
 typedef std::function<int(lua_State*)> lua_Lambda;
 
-namespace {
-    struct helper {
+namespace detail {
+    struct NewCallableHelper {
 
         static int luamm_cclosure(lua_State* _)
         {
@@ -1443,6 +1467,7 @@ namespace {
 template<typename F>
 Closure State::newCallable(F func, int extra_upvalues)
 {
+
     typename ToCanonicalCallable<F>::type canonical_callable(func);
 
     typedef ReturnValue<typename CallableCall<F>::result_t> RetType;
@@ -1469,7 +1494,7 @@ Closure State::newCallable(F func, int extra_upvalues)
         return rets;
     };
 
-    push(CClosure(&helper::luamm_cclosure, 1 + extra_upvalues));
+    push(CClosure(detail::NewCallableHelper::luamm_cclosure, 1 + extra_upvalues));
     Closure cl = this->operator[](-1);
     UserData ud = newUserData<lua_Lambda>(lambda);
 
@@ -1478,12 +1503,12 @@ Closure State::newCallable(F func, int extra_upvalues)
         auto gctab = reg["LUAMM_COMMON_GC"];
         if (!gctab.istab()) {
             Table mtab = newTable();
-            mtab["__gc"] = CClosure(helper::luamm_cleanup);
+            mtab["__gc"] = CClosure(detail::NewCallableHelper::luamm_cleanup);
             gctab = mtab;
         }
 
         Table mtab = gctab;
-        ud.set(mtab);
+        ud.setmetatable(mtab);
     }
 
     cl[1] = ud;

@@ -39,62 +39,51 @@ using namespace luamm;
 using namespace std;
 using namespace boost::mpl;
 
-BOOST_AUTO_TEST_CASE( PrePush_test )
-{
-    BOOST_MPL_ASSERT(( PredPush<std::string, const char*> ));
-    BOOST_MPL_ASSERT(( PredPush<std::string, const char*&> ));
-    BOOST_MPL_ASSERT(( PredPush<std::string, const char*&&> ));
-    BOOST_MPL_ASSERT(( PredPush<std::string, char const * const &> ));
-    BOOST_MPL_ASSERT(( PredPush<std::string, char[2]> ));
-    BOOST_MPL_ASSERT(( PredPush<std::string, const char[2]> ));
-    BOOST_MPL_ASSERT(( PredPush<std::string, std::string&> ));
-    BOOST_MPL_ASSERT(( PredPush<std::string, std::string&&> ));
-    BOOST_MPL_ASSERT(( PredPush<std::string, const std::string&> ));
+    BOOST_MPL_ASSERT(( detail::PredPush<std::string, const char*> ));
+    BOOST_MPL_ASSERT(( detail::PredPush<std::string, const char*&> ));
+    BOOST_MPL_ASSERT(( detail::PredPush<std::string, const char*&&> ));
+    BOOST_MPL_ASSERT(( detail::PredPush<std::string, char const * const &> ));
+    BOOST_MPL_ASSERT(( detail::PredPush<std::string, char[2]> ));
+    BOOST_MPL_ASSERT(( detail::PredPush<std::string, const char[2]> ));
+    BOOST_MPL_ASSERT(( detail::PredPush<std::string, std::string&> ));
+    BOOST_MPL_ASSERT(( detail::PredPush<std::string, std::string&&> ));
+    BOOST_MPL_ASSERT(( detail::PredPush<std::string, const std::string&> ));
 
-    BOOST_MPL_ASSERT(( PredPush<Number, int> ));
-    BOOST_MPL_ASSERT(( PredPush<Number, unsigned int> ));
-    BOOST_MPL_ASSERT(( PredPush<Number, long> ));
-    BOOST_MPL_ASSERT(( PredPush<Number, double> ));
-}
+    BOOST_MPL_ASSERT(( detail::PredPush<Number, int> ));
+    BOOST_MPL_ASSERT(( detail::PredPush<Number, unsigned int> ));
+    BOOST_MPL_ASSERT(( detail::PredPush<Number, long> ));
+    BOOST_MPL_ASSERT(( detail::PredPush<Number, double> ));
 
-BOOST_AUTO_TEST_CASE( PredGet_test )
-{
-    BOOST_MPL_ASSERT(( PredGet<Number, Number> ));
-    BOOST_MPL_ASSERT(( PredGet<Number, double> ));
-    BOOST_MPL_ASSERT(( PredGet<Number, int> ));
-    BOOST_MPL_ASSERT(( PredGet<Number, bool> ));
-    BOOST_MPL_ASSERT(( not_<PredGet<Number, void*>> ));
+    BOOST_MPL_ASSERT(( detail::PredGet<Number, Number> ));
+    BOOST_MPL_ASSERT(( detail::PredGet<Number, double> ));
+    BOOST_MPL_ASSERT(( detail::PredGet<Number, int> ));
+    BOOST_MPL_ASSERT(( detail::PredGet<Number, bool> ));
+    BOOST_MPL_ASSERT(( not_<detail::PredGet<Number, void*>> ));
 
 
-    BOOST_MPL_ASSERT(( PredGet<const char*, string> ));
-    BOOST_MPL_ASSERT(( PredGet<const char*, const char*> ));
-    BOOST_MPL_ASSERT(( not_<PredGet<const char*, char*>> ));
-}
+    BOOST_MPL_ASSERT(( detail::PredGet<const char*, string> ));
+    BOOST_MPL_ASSERT(( detail::PredGet<const char*, const char*> ));
+    BOOST_MPL_ASSERT(( not_<detail::PredGet<const char*, char*>> ));
 
-#ifndef _MSC_VER
-BOOST_AUTO_TEST_CASE( Choose )
-{
     BOOST_MPL_ASSERT((std::is_same<
-                        SelectImpl<PredPush, const char*>::type,
+                        detail::SelectImpl<detail::PredPush, const char*>::type,
                         string
                       >));
 
     BOOST_MPL_ASSERT((std::is_same<
-                        SelectImpl<PredGet, string>::type,
+                        detail::SelectImpl<detail::PredGet, string>::type,
                         const char*
                       >));
 
     BOOST_MPL_ASSERT((std::is_same<
-                        SelectImpl<PredGet, int>::type,
+                        detail::SelectImpl<detail::PredGet, int>::type,
                         Number
                       >));
 
     BOOST_MPL_ASSERT((std::is_same<
-                        SelectImpl<PredGet, unsigned int>::type,
+                        detail::SelectImpl<detail::PredGet, unsigned int>::type,
                         Number
                       >));
-}
-#endif
 
 static int cfunction(lua_State* st) {
     return 1;
@@ -172,8 +161,8 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         Table mt = lua.newTable();
         BOOST_CHECK_EQUAL(mt.index, 5);
 
-        t.set(mt);
-        Table _mt = t.get();
+        t.setmetatable(mt);
+        Table _mt = t.getmetatable();
         BOOST_REQUIRE(mt == _mt);
     }
 
@@ -333,10 +322,12 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         Table mod = move(
             lua.class_<Hello>("hello")
             .def("add", [](int i, int j) { return i+j; })
+            .init()
         );
         BOOST_CHECK_EQUAL((const char*)mod["className"], "hello");
-        Closure add = mod["add"];
-        BOOST_CHECK_EQUAL(Number(add(1,2)), 3);
+        Closure add = lua.newFunc(
+   "local hello, a,b = ...; local obj = hello(); return obj.add(a, b)");
+        BOOST_CHECK_EQUAL(Number(add(mod, 1, 2)), 3);
     }
     BOOST_CHECK_EQUAL(lua.top(), 0);
 
@@ -378,13 +369,17 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         Closure setter = lua.newFunc(R"==(
             local data = ...
             d = data();
-            return d:setNum(5);
+            return d:set_num(5);
         )==");
         UserData d = setter(mod, mod);
         BOOST_CHECK_EQUAL(d.to<Data>().num, 5);
 
         d.to<Data>().num = 10;
-        BOOST_CHECK_EQUAL(Number( Closure(mod["getNum"])(d) ), 10);
+        Number result = lua.newFunc(R"==(
+            local d = ...
+            return d:get_num()
+        )==")(d);
+        BOOST_CHECK_EQUAL(result, 10);
     }
     BOOST_CHECK_EQUAL(lua.top(), 0);
 
