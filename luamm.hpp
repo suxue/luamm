@@ -25,6 +25,7 @@
 #include <lua.hpp>
 #include <assert.h>
 #include <ctype.h>
+#include <cstdint>
 
 #include <functional>
 #include <stdexcept>
@@ -39,9 +40,6 @@
 #include <boost/mpl/size.hpp>
 #include <boost/mpl/vector.hpp>
 #include <boost/preprocessor.hpp>
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_generators.hpp>
-#include <boost/uuid/uuid_io.hpp>
 
 namespace luamm {
 
@@ -866,7 +864,7 @@ class Class_ {
     State& state;
     Table mod;
     Table mtab;
-    const std::string uuid;
+    std::uintptr_t uuid;
     bool hasAttribute{false};
 public:
     enum Attributes  {
@@ -1118,7 +1116,7 @@ template<typename Class>
 template<typename... Args>
 Class_<Class>& Class_<Class>::init()
 {
-    std::string mkey = uuid;
+    std::string mkey = std::to_string(uuid);
     Table constructor = state.newTable();
     constructor["__call"] = state.newCallable(
         [mkey](State& st, Table&& tab, Args&&... args) {
@@ -1134,13 +1132,14 @@ Class_<Class>& Class_<Class>::init()
 
 template<typename Class>
 Class_<Class>::Class_(const std::string& name, State& state)
-    : name(name), state(state), mod(state.newTable()), mtab(state.newTable()),
-        uuid(boost::uuids::to_string(boost::uuids::random_generator()())) {
+    : name(name), state(state), mod(state.newTable()),
+      mtab(state.newTable()), uuid(reinterpret_cast<decltype(uuid)>(this))
+{
     // initialize metatable
     mod["className"] = name;
     mtab["__metatable"] = Nil();
     mtab["__index"] = mtab;
-    state.registry()[uuid] = mtab;
+    state.registry()[std::to_string(uuid)] = mtab;
 }
 
 inline State::State(const State& o) : ptr_(o.ptr_) {}
