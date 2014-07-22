@@ -20,6 +20,11 @@ Testing and Coverage
     make test
     make coverage-html
 
+Documentation
+--------------
+
+[github wiki](https://github.com/suxue/luamm/wiki)
+
 License
 --------
 
