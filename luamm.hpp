@@ -32,6 +32,7 @@
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <iostream>
 
 #include <boost/function_types/parameter_types.hpp>
 #include <boost/function_types/result_type.hpp>
@@ -120,10 +121,13 @@ struct KeySetter;
 template<typename Container, typename Key>
 struct KeyTyper;
 
+template<typename LuaValue>
+struct VarProxy;
 
 /* router class for read/write/update a lua variable */
 template<typename Container, typename Key, typename KeyStore = Key>
 class Variant  {
+    friend class VarProxy<Variant<lua_State*, int>>;
 private:
     KeyStore index;
     Container state;
@@ -281,8 +285,6 @@ namespace detail {
     };
 }
 
-template<typename LuaValue>
-struct VarProxy;
 
 struct VarBase {
     lua_State *state;
@@ -865,7 +867,8 @@ class Class_ {
     Table mod;
     Table mtab;
     std::uintptr_t uuid;
-    bool hasAttribute{false};
+    bool hasReadAttribute{false};
+    bool hasWriteAttribute{false};
 public:
     enum Attributes  {
         Read = 1,
@@ -889,7 +892,8 @@ public:
     Class_<Class>& attribute(const std::string& name, T Class::*mp,
                              unsigned perm = Read | Write);
 
-    operator Table() && { return std::move(mod); }
+    void setupAccessor();
+    operator Table() && { setupAccessor(); return std::move(mod); }
 
     Table getmetatable();
 };
@@ -1057,6 +1061,74 @@ struct ParameterListTransformer<T, Data, ParaList, 0, Args...> {
 };
 } // end namespace detail
 
+template<>
+struct VarProxy<Variant<lua_State*,int>> : VarBase {
+    static bool push(const Variant<lua_State*,int>& var) {
+        lua_pushnil(var.state);
+        lua_copy(var.state, var.index, -1);
+        return true;
+    }
+};
+
+struct ClassAccessorHelper {
+    static int getter(lua_State* _) {
+        State st(_);
+        UserData ud = st[1];
+        Table mtab = ud.getmetatable();
+        lua_pushnil(_);
+        lua_copy(_, 2, -1);
+        lua_gettable(_, mtab.index);
+        if (st[-1].isnil()) {
+            if (!st[2].isstr()) {
+                return 0;
+            }
+            const char *key = st[2];
+            st.push(std::string("get_") + key);
+            lua_gettable(_, mtab.index);
+            if (st[-1].isfun()) {
+                Closure getter = st[-1];
+                auto res  = getter(ud);
+                (void)res;
+                return 1;
+            } else {
+                return 0;
+            }
+        } else {
+            return 1;
+        }
+    }
+
+    static int setter(lua_State* _) {
+        State st(_);
+        if (!st[2].isstr()) return 0;
+        UserData ud = st[1];
+        const char *key = st[2];
+        Table mtab = ud.getmetatable();
+        auto setter_candidate = mtab[std::string("set_") + key];
+        if (!setter_candidate.isfun()) return 0;
+        Closure setter = setter_candidate;
+        setter(ud, st[3]);
+        return 0;
+    }
+};
+
+template<typename Class>
+void Class_<Class>::setupAccessor()
+{
+    if (!hasReadAttribute && !hasWriteAttribute)
+        return;
+
+    if (hasReadAttribute) {
+        state.push(CClosure(ClassAccessorHelper::getter));
+        mtab["__index"] = Closure(state[-1]);
+    }
+
+    if (hasWriteAttribute) {
+        state.push(CClosure(ClassAccessorHelper::setter));
+        mtab["__newindex"] = Closure(state[-1]);
+    }
+}
+
 
 template<typename Class>
 template<typename T>
@@ -1064,14 +1136,15 @@ Class_<Class>& Class_<Class>::attribute(const std::string& name,
                                         T Class::*mp,
                                         unsigned perm)
 {
-    hasAttribute = true;
     if (perm & Read) {
+        hasReadAttribute = true;
         mtab[std::string("get_") + name] = state.newCallable([mp](UserData&& ud) {
             auto& ref = ud.to<Class>();
             return ref.*mp;
         });
     }
     if (perm & Write) {
+        hasWriteAttribute = true;
         mtab[std::string("set_") + name] = state.newCallable(
             [mp](UserData&& ud, const T& val) {
                 auto& ref = ud.to<Class>();

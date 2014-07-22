@@ -384,6 +384,27 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
     BOOST_CHECK_EQUAL(lua.top(), 0);
 
     {
+        auto scope = lua.newScope();
+        struct Data {
+            Data(int i) : num(i) {}
+            int num;
+        };
+        Table mod = std::move(
+            lua.class_<Data>("data")
+            .attribute("num", &Data::num)
+            .init<int>()
+        );
+
+        lua.newFunc(R"==(
+            local mod = ...
+            local d = mod(5);
+            assert(d.num == 5, "d is initialized to 5")
+            d.num = 10
+            assert(d.num == 10, "d is set to 10")
+        )==")(mod);
+    }
+
+    {
         // long parameter list
         auto scope = lua.newScope();
         Closure cl = lua.newCallable([](int a, int b, int c, int d, int e) {
