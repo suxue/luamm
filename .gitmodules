@@ -1,6 +1,8 @@
 [submodule "autoconf-common"]
 	path = autoconf-common
 	url = git@github.com:suxue/autoconf-common.git
+    ignore = dirty
 [submodule "doc"]
 	path = doc
 	url = git@github.com:suxue/luamm.wiki.git
+    ignore = dirty
