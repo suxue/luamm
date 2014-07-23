@@ -958,6 +958,18 @@ public:
         luaL_openlibs(ptr());
     }
 
+    void debug() {
+        Table debug = open(luaopen_debug);
+        Closure cl = newFunc("local debug = ...;  debug.debug()");
+        cl(debug);
+    }
+
+    Table open(int (*lib)(lua_State*)) {
+        push(lib);
+        Closure cl = this->operator[](-1);
+        return cl();
+    }
+
     template<typename T>
     void error(const T& t) {
         push(t);
