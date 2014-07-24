@@ -216,7 +216,7 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
 
     {
         // light cfunction (no upvalue
-        lua.push(CClosure(
+        Closure cl = lua.push(CClosure(
         [](lua_State* st) {
             // inside a lua cfunction,
             // the top is 0 initialy, and first argument at position 1, etc
@@ -228,7 +228,6 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
             return 1;
         }));
         Number in = rand();
-        Closure cl = lua[-1];
         BOOST_CHECK_EQUAL( Number(cl(in)), in+1 );
     }
     BOOST_CHECK_EQUAL(lua.top(), 3);

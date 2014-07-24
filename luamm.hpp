@@ -32,7 +32,6 @@
 #include <string>
 #include <tuple>
 #include <type_traits>
-#include <iostream>
 
 #include <boost/function_types/parameter_types.hpp>
 #include <boost/function_types/result_type.hpp>
@@ -95,7 +94,6 @@ typedef lua_CFunction CFunction;
 /* primitive lua typs */
 class Nil {};
 
-
 /* Base class for errors */
 struct RuntimeError : std::runtime_error {
     RuntimeError(const std::string& s) : std::runtime_error(s) {}
@@ -127,7 +125,7 @@ struct VarProxy;
 /* router class for read/write/update a lua variable */
 template<typename Container, typename Key, typename KeyStore = Key>
 class Variant  {
-    friend class VarProxy<Variant<lua_State*, int>>;
+    friend struct VarProxy<Variant<lua_State*, int>>;
 private:
     KeyStore index;
     Container state;
@@ -251,9 +249,6 @@ struct CClosure {
 public:
     CClosure(CFunction func, int index = 0)
         : index(index), func(func) {}
-    operator CFunction() {
-        return func;
-    }
 };
 
 
@@ -266,6 +261,7 @@ struct UserData : detail::HasMetaTable<UserData> {
         o.state = nullptr;
         o.index = 0;
     }
+    UserData(const UserData&) = delete;
 
     template<typename T>
     T& to() {
@@ -273,24 +269,13 @@ struct UserData : detail::HasMetaTable<UserData> {
         return *static_cast<T*>(p);
     }
     ~UserData();
-private:
-    UserData(const UserData&);
 };
 
-
-namespace detail {
-    template<>
-    struct StackVariable<UserData> {
-        enum { value = 1 };
-    };
-}
-
+namespace detail {template<>struct StackVariable<UserData> { enum{value=1};};}
 
 struct VarBase {
     lua_State *state;
-
     VarBase(lua_State *st) : state(st) {}
-
     template<typename T>
     VarProxy<T>& to() { return static_cast<VarProxy<T>&>(*this); }
 };
@@ -299,8 +284,7 @@ struct VarBase {
 template<>
 struct VarProxy<CClosure> : VarBase {
     bool push(CClosure c) {
-        for (auto i = 0; i < c.index; i++)
-            lua_pushnil(state);
+        for (auto i = 0; i < c.index; i++) { lua_pushnil(state); }
         lua_pushcclosure(state, c.func, c.index);
         return true;
     }
@@ -309,14 +293,11 @@ struct VarProxy<CClosure> : VarBase {
 // light userdata is just a void* pointer
 template<>
 struct VarProxy<void*> : VarBase {
-    bool push(void* l) {
-        lua_pushlightuserdata(state, l);
-        return true;
-    }
+    bool push(void* l) { lua_pushlightuserdata(state, l); return true; }
 
     void *get(int index, bool& success) {
         auto p = lua_touserdata(state, index);
-        if (p) success = true;
+        if (p) { success = true; }
         return p;
     }
     enum { tid = LUA_TLIGHTUSERDATA };
@@ -926,8 +907,9 @@ public:
     }
 
     template<typename T>
-    void push(const T& value) {
+    Variant<lua_State*,int> push(const T& value) {
         VarPusher<T>::push(ptr(), value);
+        return Variant<lua_State*,int>(ptr(),-1);
     }
 
     Table newTable(int narray = 0, int nother = 0) {
@@ -960,14 +942,11 @@ public:
 
     void debug() {
         Table debug = open(luaopen_debug);
-        Closure cl = newFunc("local debug = ...;  debug.debug()");
-        cl(debug);
+        (Closure(debug["debug"]))();
     }
 
     Table open(int (*lib)(lua_State*)) {
-        push(lib);
-        Closure cl = this->operator[](-1);
-        return cl();
+        return  Closure(push(lib))();
     }
 
     template<typename T>
@@ -1131,13 +1110,13 @@ void Class_<Class>::setupAccessor()
         return;
 
     if (hasReadAttribute) {
-        state.push(CClosure(ClassAccessorHelper::getter));
-        mtab["__index"] = Closure(state[-1]);
+        mtab["__index"] = Closure(
+            state.push(CClosure(ClassAccessorHelper::getter)));
     }
 
     if (hasWriteAttribute) {
-        state.push(CClosure(ClassAccessorHelper::setter));
-        mtab["__newindex"] = Closure(state[-1]);
+        mtab["__newindex"] = Closure(
+                state.push(CClosure(ClassAccessorHelper::setter)));
     }
 }
 
@@ -1235,41 +1214,23 @@ public:
     ~NewState();
 };
 
-inline State::State(lua_State *p)
-    : ptr_(p) {
-}
+inline State::State(lua_State *p) : ptr_(p) { }
 
-inline lua_State* State::ptr() {
-    return ptr_;
-}
+inline lua_State* State::ptr() { return ptr_; }
 
 /* State with a new lua_State */
-inline NewState::NewState()
-    : State(luaL_newstate()) {
-}
+inline NewState::NewState() : State(luaL_newstate()) { }
 
-inline NewState::~NewState() {
-    lua_close(ptr());
-}
+inline NewState::~NewState() { lua_close(ptr()); }
 
 inline Table::Table(lua_State* st, int i)
-    : state(st), index(lua_absindex(st,i)) {
-    assert(state);
-    assert(index);
-}
+    : state(st), index(lua_absindex(st,i)) {}
 
+inline Table::~Table() { detail::cleanup(state, index); }
 
-inline Table::~Table() {
-    detail::cleanup(state, index);
-}
+inline UserData::~UserData() { detail::cleanup(state, index); }
 
-inline UserData::~UserData() {
-    detail::cleanup(state, index);
-}
-
-inline Closure::~Closure() {
-    detail::cleanup(state, index);
-}
+inline Closure::~Closure() { detail::cleanup(state, index); }
 
 template<typename T>
 Variant<Table*, T, typename VarPusher<T>::type> Table::operator[](const T& k) {
@@ -1284,13 +1245,11 @@ inline void Table::setmetatable(const Table& metatab) {
 }
 
 struct NoMetatableError : public RuntimeError {
-    NoMetatableError() : RuntimeError("") {}
+    NoMetatableError() : RuntimeError("no metatable exists") {}
 };
 
 inline Table Table::getmetatable() {
-    if (!lua_getmetatable(state, index)) {
-        throw NoMetatableError();
-    }
+    if (!lua_getmetatable(state, index)) { throw NoMetatableError(); }
     return Table(state, -1);
 }
 
@@ -1363,9 +1322,7 @@ struct IsSingleReturnValue {
 
 template<typename T>
 struct SingleReturn {
-    static void collect(State& st, T&& ret) {
-        st[1] = ret;
-    }
+    static void collect(State& st, T&& ret) { st[1] = ret; }
     enum { value = 1 };
 };
 
@@ -1402,13 +1359,12 @@ struct ReturnValue {
 };
 
 template<>
-struct ReturnValue<void> {
-    enum { value = 0 };
-};
+struct ReturnValue<void> { enum { value = 0 }; };
 
 template<typename TL>
 struct TypeChecker<TL, 0> {
-    static void check(State& st, int offset) {} };
+    static void check(State& st, int offset) {}
+};
 
 template<typename F>
 struct ToLambda {
@@ -1523,12 +1479,10 @@ BOOST_PP_REPEAT_FROM_TO(2, LUAMM_LAMBDA_PARANUMBER, LUAMM_TEMPL,)
 #undef LUAMM_TEMPL
 #undef LUAMM_LAMBDA_PARANUMBER
 
-
 typedef std::function<int(lua_State*)> lua_Lambda;
 
 namespace detail {
     struct NewCallableHelper {
-
         static int luamm_cclosure(lua_State* _)
         {
             State st(_);
