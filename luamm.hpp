@@ -32,7 +32,6 @@
 #include <string>
 #include <tuple>
 #include <type_traits>
-#include <iostream>
 
 #include <boost/function_types/parameter_types.hpp>
 #include <boost/function_types/result_type.hpp>
@@ -487,6 +486,46 @@ namespace detail {
     };
 }
 
+
+
+struct Closure;
+struct ReturnProxy {
+    Closure *self;
+    int nargs;
+    ReturnProxy(Closure *self, int nargs) :  self(self), nargs(nargs) {}
+    ReturnProxy(const ReturnProxy&) = delete;
+    ReturnProxy(ReturnProxy&& o) : self(o.self), nargs(o.nargs) {
+        o.self = nullptr;
+    }
+    ReturnProxy& call(int nresults);
+
+    template<typename T>
+    operator T() &&;
+
+    template<typename ... Args>
+    operator std::tuple<Args...>() &&;
+
+    ~ReturnProxy() { if (self) { call(0); } }
+};
+
+template<typename... Args>
+struct TieProxy {
+    std::tuple<Args...> data;
+    TieProxy(std::tuple<Args&...> arg) : data(arg) {}
+    void operator=(int a) {
+        std::get<0>(data) = a;
+    }
+    TieProxy(const TieProxy&) = delete;
+    TieProxy(TieProxy&& o) : data(std::move(o.data)) {}
+    void operator=(ReturnProxy&& retproxy);
+};
+
+template<typename... Types>
+TieProxy<Types&...> tie(Types&... args)
+{
+    return TieProxy<Types&...>(std::tie(args...));
+}
+
 /* a callable representing a lua variable exitsing in the stack,
  * either a c function or a lua function  */
 struct Closure : public detail::HasMetaTable<Closure> {
@@ -517,43 +556,14 @@ struct Closure : public detail::HasMetaTable<Closure> {
     template<int rvals>
     typename Rvals<rvals>::type __return__();
 
-    struct RetProxy {
-        Closure *self;
-        int nargs;
-        RetProxy(Closure *self, int nargs) :  self(self), nargs(nargs) {}
-        RetProxy(const RetProxy&) = delete;
-        RetProxy(RetProxy&& o) : self(o.self), nargs(o.nargs) {
-            o.self = nullptr;
-        }
-        RetProxy& call(int nresults) {
-            auto i = lua_pcall(self->state, nargs, nresults, 0);
-            if (i != LUA_OK) {
-                throw RuntimeError(lua_tostring(self->state, -1));
-            }
-            self = nullptr;
-            return *this;
-        }
-
-        template<typename T>
-        operator T() && {
-            auto self = this->self;
-            call(1);
-            return Variant<lua_State*,int>(self->state, lua_gettop(self->state));
-        }
-
-        template<typename ... Args>
-        operator std::tuple<Args...>() &&;
-
-        ~RetProxy()  { if (self) { call(0); } }
-    };
 
     template <typename... Args>
-    RetProxy operator()(Args&& ... args) {
+    ReturnProxy operator()(Args&& ... args) {
         return call(std::forward<Args>(args)...);
     }
 
     template<typename... Args>
-    RetProxy call(Args&&... args) {
+    ReturnProxy call(Args&&... args) {
         // push the function to be called
         lua_pushnil(state);
         lua_copy(state, index, -1);
@@ -562,7 +572,7 @@ struct Closure : public detail::HasMetaTable<Closure> {
     }
 
     template<int count, typename T, typename... Args>
-    RetProxy __call__(T&& a, Args&&... args) {
+    ReturnProxy __call__(T&& a, Args&&... args) {
         {
             detail::Guard<VarPushError> gd;
             gd.status = VarPusher<T>::push(state, std::forward<T>(a));
@@ -571,12 +581,29 @@ struct Closure : public detail::HasMetaTable<Closure> {
     }
 
     template<int count>
-    RetProxy __call__() {
-        return RetProxy(this, count);
+    ReturnProxy __call__() {
+        return ReturnProxy(this, count);
     }
 private:
     Closure(const Closure&);
 };
+
+
+inline ReturnProxy& ReturnProxy::call(int nresults) {
+    auto i = lua_pcall(self->state, nargs, nresults, 0);
+    if (i != LUA_OK) {
+        throw RuntimeError(lua_tostring(self->state, -1));
+    }
+    self = nullptr;
+    return *this;
+}
+
+template<typename T>
+ReturnProxy::operator T() && {
+    auto self = this->self;
+    call(1);
+    return Variant<lua_State*,int>(self->state, lua_gettop(self->state));
+}
 
 template<>
 inline void Closure::__return__<0>() {}
@@ -603,11 +630,16 @@ BOOST_PP_REPEAT_FROM_TO(2, LUAMM_MAX_RETVALUES, LUAMM_RET,)
 #undef LUAMM_Y
 #undef LUAMM_ARGS
 #undef LUAMM_RET
-#undef LUAMM_PROXY
 
+template<typename... Args>
+void TieProxy<Args...>::operator=(ReturnProxy&& retproxy) {
+    auto self = retproxy.self;
+    retproxy.call(sizeof...(Args));
+    data = self->__return__<sizeof...(Args)>();
+}
 
 template<typename ... Args>
-Closure::RetProxy::operator std::tuple<Args...>() &&
+ReturnProxy::operator std::tuple<Args...>() &&
 {
     auto self = this->self;
     call(sizeof...(Args));
@@ -914,8 +946,6 @@ public:
 
     Table getmetatable();
 };
-
-
 
 /* wrap an existing lua_State */
 class State {
