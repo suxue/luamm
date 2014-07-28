@@ -248,7 +248,7 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         Closure cl = lua.newCallable([](State& st, string&& key, Number num) {
             st[key] = num;
         });
-        cl.call<0>("hello", 12);
+        cl("hello", 12);
         BOOST_CHECK_EQUAL(Number(lua["hello"]), 12);
     }
     BOOST_CHECK_EQUAL(lua.top(), 3);
@@ -272,13 +272,11 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
             return make_tuple(b, a);
         });
 
-        auto ret = cl.call<2>(11, 12);
+        std::tuple<int, int> ret = cl(11, 12);
 
         BOOST_CHECK_EQUAL(lua.top(), 6);
-        Number a = get<0>(ret);
-        Number b = get<1>(ret);
-        BOOST_CHECK_EQUAL(a, 12);
-        BOOST_CHECK_EQUAL(b, 11);
+        BOOST_CHECK_EQUAL(std::get<0>(ret), 12);
+        BOOST_CHECK_EQUAL(std::get<1>(ret), 11);
     }
 
     BOOST_CHECK_EQUAL(lua.top(), 3);
@@ -300,7 +298,7 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         auto scope = lua.newScope();
         Closure cl = lua.newFunc("return 1, 2, 3, 5, 8, 13;");
         int a, b, d, e, f;
-        tie(a, b, ignore, d, e, f) = cl.call<6>();
+        tie(a, b, ignore, d, e, f) = cl.call();
         BOOST_CHECK_EQUAL(a+b+d+e+f, 29);
     }
     BOOST_CHECK_EQUAL(lua.top(), 3);
@@ -410,7 +408,7 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
             return make_tuple(e, d, c, b, a);
         });
         int a, b, c, d, e;
-        tie(e, d, c, b, a) = cl.call<5>(1,2,3,4,5);
+        tie(e, d, c, b, a) = cl(1,2,3,4,5);
         BOOST_CHECK_EQUAL(a, 1);
         BOOST_CHECK_EQUAL(b, 2);
         BOOST_CHECK_EQUAL(c, 3);
