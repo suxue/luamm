@@ -485,28 +485,6 @@ namespace detail {
     struct GenTuple<0, Arg, Args...> {
         typedef std::tuple<Args...> type;
     };
-
-    template<int n>
-    struct identity_when_greater_than_1 {
-        enum { value = n };
-    };
-
-    template<> struct identity_when_greater_than_1<1> { };
-    template<> struct identity_when_greater_than_1<0> { };
-
-    template<typename T>
-    struct is_tuple {
-        template<int n> struct ret { int data[n-2]; };
-
-        template<typename C>
-        static char test(ret<
-            identity_when_greater_than_1<std::tuple_size<C>::value>::value>*);
-
-        template<typename C>
-        static double test(...);
-
-        enum { value = sizeof(test<T>(nullptr)) == 1 };
-    };
 }
 
 /* a callable representing a lua variable exitsing in the stack,
@@ -547,19 +525,20 @@ struct Closure : public detail::HasMetaTable<Closure> {
         RetProxy(RetProxy&& o) : self(o.self), nargs(o.nargs) {
             o.self = nullptr;
         }
-        void call(int nresults) {
+        RetProxy& call(int nresults) {
             auto i = lua_pcall(self->state, nargs, nresults, 0);
             if (i != LUA_OK) {
                 throw RuntimeError(lua_tostring(self->state, -1));
             }
+            self = nullptr;
+            return *this;
         }
 
         template<typename T>
         operator T() && {
+            auto self = this->self;
             call(1);
-            auto ret = Variant<lua_State*,int>(self->state, -1);
-            self = nullptr;
-            return ret;
+            return Variant<lua_State*,int>(self->state, lua_gettop(self->state));
         }
 
         template<typename ... Args>
@@ -630,10 +609,10 @@ BOOST_PP_REPEAT_FROM_TO(2, LUAMM_MAX_RETVALUES, LUAMM_RET,)
 template<typename ... Args>
 Closure::RetProxy::operator std::tuple<Args...>() &&
 {
+    auto self = this->self;
     call(sizeof...(Args));
     std::tuple<Args...> tup;
     tup = self->__return__<sizeof...(Args)>();
-    self = nullptr;
     return tup;
 }
 
@@ -1600,7 +1579,6 @@ Closure State::newCallable(F func, int extra_upvalues)
             mtab["__gc"] = CClosure(detail::NewCallableHelper::luamm_cleanup);
             gctab = mtab;
         }
-
         Table mtab = gctab;
         ud.setmetatable(mtab);
     }
