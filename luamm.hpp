@@ -32,6 +32,7 @@
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <iostream>
 
 #include <boost/function_types/parameter_types.hpp>
 #include <boost/function_types/result_type.hpp>
@@ -542,6 +543,10 @@ struct Closure : public detail::HasMetaTable<Closure> {
         Closure *self;
         int nargs;
         RetProxy(Closure *self, int nargs) :  self(self), nargs(nargs) {}
+        RetProxy(const RetProxy&) = delete;
+        RetProxy(RetProxy&& o) : self(o.self), nargs(o.nargs) {
+            o.self = nullptr;
+        }
         void call(int nresults) {
             auto i = lua_pcall(self->state, nargs, nresults, 0);
             if (i != LUA_OK) {
@@ -549,28 +554,18 @@ struct Closure : public detail::HasMetaTable<Closure> {
             }
         }
 
-        template<typename T, typename e = typename std::enable_if<
-            !detail::is_tuple<T>::value, T>::type>
+        template<typename T>
         operator T() && {
             call(1);
             auto ret = Variant<lua_State*,int>(self->state, -1);
-            self->state = nullptr;
-            return std::move(ret);
+            self = nullptr;
+            return ret;
         }
 
-        operator std::tuple<int, int, int>();
+        template<typename ... Args>
+        operator std::tuple<Args...>() &&;
 
-/* the maximum return values you can retrieved after calling Closure */
-#ifndef LUAMM_MAX_RETVALUES
-#define LUAMM_MAX_RETVALUES 15
-#endif
-
-#define LUAMM_PROXY_DECL(_a, n, _b) operator \
-        typename detail::GenTuple<n>::type() &&;
-BOOST_PP_REPEAT_FROM_TO(2, LUAMM_MAX_RETVALUES, LUAMM_PROXY_DECL,)
-#undef LUAMM_PROXY_DECL
-
-        ~RetProxy()  { if (!self) { call(0); } }
+        ~RetProxy()  { if (self) { call(0); } }
     };
 
     template <typename... Args>
@@ -614,6 +609,9 @@ inline typename Closure::Rvals<1>::type Closure::__return__<1>() {
 }
 
 
+#ifndef LUAMM_MAX_RETVALUES
+#define LUAMM_MAX_RETVALUES 15
+#endif
 #define LUAMM_X(n) Variant<lua_State*, int>(state, -n)BOOST_PP_COMMA_IF(BOOST_PP_SUB(n,1))
 #define LUAMM_Y(a, b, c) LUAMM_X(BOOST_PP_SUB(c, b))
 #define LUAMM_ARGS(n) BOOST_PP_REPEAT(n, LUAMM_Y, n)
@@ -621,16 +619,23 @@ inline typename Closure::Rvals<1>::type Closure::__return__<1>() {
     inline typename Closure::Rvals<n>::type Closure::__return__<n>() {\
         return std::make_tuple(LUAMM_ARGS(n)); \
     }
-#define LUAMM_PROXY(_a, n, _b) inline Closure::RetProxy::\
-    operator typename detail::GenTuple<n>::type() && \
-    { auto x = self->__return__<n>(); self = nullptr; return x;}
 BOOST_PP_REPEAT_FROM_TO(2, LUAMM_MAX_RETVALUES, LUAMM_RET,)
-BOOST_PP_REPEAT_FROM_TO(2, LUAMM_MAX_RETVALUES, LUAMM_PROXY,)
 #undef LUAMM_X
 #undef LUAMM_Y
 #undef LUAMM_ARGS
 #undef LUAMM_RET
 #undef LUAMM_PROXY
+
+
+template<typename ... Args>
+Closure::RetProxy::operator std::tuple<Args...>() &&
+{
+    call(sizeof...(Args));
+    std::tuple<Args...> tup;
+    tup = self->__return__<sizeof...(Args)>();
+    self = nullptr;
+    return tup;
+}
 
 namespace detail {
     template<>
@@ -1130,8 +1135,7 @@ struct ClassAccessorHelper {
             lua_gettable(_, mtab.index);
             if (st[-1].isfun()) {
                 Closure getter = st[-1];
-                auto res  = getter(ud);
-                (void)res;
+                getter(ud).call(1);
                 return 1;
             } else {
                 return 0;
