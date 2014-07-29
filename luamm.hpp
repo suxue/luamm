@@ -1091,6 +1091,8 @@ public:
     Class_<Class> class_(const std::string& name) {
         return Class_<Class>(name, *this);
     }
+
+    virtual ~State() {}
 };
 
 namespace detail {
@@ -1284,7 +1286,7 @@ inline State::State(const State& o) : ptr_(o.ptr_) {}
 class NewState : public State {
 public:
     NewState();
-    ~NewState();
+    virtual ~NewState();
 };
 
 inline State::State(lua_State *p) : ptr_(p) { }

@@ -1,5 +1,6 @@
 [![Build Status](https://travis-ci.org/suxue/luamm.svg?branch=dev)](https://travis-ci.org/suxue/luamm)
 [![Coverage Status](https://coveralls.io/repos/suxue/luamm/badge.png?branch=dev)](https://coveralls.io/r/suxue/luamm?branch=dev)
+[![Coverity](https://scan.coverity.com/projects/2665/badge.svg)](https://scan.coverity.com/projects/2665)
 
 Dependencies
 ------------
