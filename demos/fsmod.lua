@@ -1,23 +1,25 @@
 local fs = require("fs")
-local a = fs.path("/usr/lib/sys-root/mingw/bin/SDL2.dll")
-print (a:filename())
-print (a:parent_path())
-print (a:parent_path():parent_path())
-print (a:relative_path())
-print (a:extension())
-print (a:empty())
+local a = fs.path("/")
+a:filename()
+a:parent_path()
+a:parent_path():parent_path()
+a:relative_path()
+a:extension()
+a:empty()
 local b = a:extension()
-print(a .. b)
-print(b:is_absolute())
-print(b < a)
-print(b > a)
+local c
+
+c = a .. b
+c = b:is_absolute()
+c = b < a
+c = b > a
 
 for part in a:each() do
-   print(part)
+   c = part
 end
 
 for part in a:each(true) do
-   print(part)
+   c = part
 end
 
-print (fs.path("/"):stat():type())
+c = fs.path("/"):stat():type()

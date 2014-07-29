@@ -1,11 +1,12 @@
-AM_CPPFLAGS = -I$(srcdir)/..
+ACLOCAL_AMFLAGS = -I ../autoconf-common/m4
+AM_CPPFLAGS = -I$(srcdir)/.. $(LUA_CFLAGS)
 
 lib_LTLIBRARIES  = hello.la fs.la
 hello_la_SOURCES = hellomod.cpp ../luamm.hpp
-hello_la_LDFLAGS = -llua -module -avoid-version -shared -no-undefined
+hello_la_LDFLAGS = $(LUA_LIBS) -module -avoid-version -shared -no-undefined
 
 fs_la_SOURCES = fsmod.cpp ../luamm.hpp
-fs_la_LDFLAGS = -llua -lboost_filesystem -module -avoid-version -shared -no-undefined
+fs_la_LDFLAGS = $(LUA_LIBS) -lboost_filesystem -module -avoid-version -shared -no-undefined
 # -no-undefined  for libtool on mingw
 
 test:  test_hello test_fs
