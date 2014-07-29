@@ -18,7 +18,7 @@ LIBS = -lboost_test_exec_monitor $(LUA_LIBS)
 luamm_test_SOURCES = test.cpp luamm.hpp
 
 test: luamm_test$(EXEEXT) demo_test
-	./luamm_test$(EXEEXT)
+	./luamm_test$(EXEEXT) --build_info --detect_memory_leak=1 --random=1
 
 ## START COVERAGE
 if HAVE_GCOV

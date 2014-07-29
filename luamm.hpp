@@ -123,9 +123,9 @@ template<typename LuaValue>
 struct VarProxy;
 
 /* router class for read/write/update a lua variable */
-template<typename Container, typename Key, typename KeyStore = Key>
+template<typename Container = lua_State*, typename Key = int, typename KeyStore = Key>
 class Variant  {
-    friend struct VarProxy<Variant<lua_State*, int>>;
+    friend struct VarProxy<Variant<>>;
 private:
     KeyStore index;
     Container state;
@@ -475,7 +475,7 @@ struct VarPushError : RuntimeError { VarPushError() : RuntimeError("") {} };
 
 namespace detail {
     /* generate a tuple to simulate multiple return value in c++*/
-    template<int I, typename Arg = Variant<lua_State*, int>,  typename... Args>
+    template<int I, typename Arg = Variant<>,  typename... Args>
     struct GenTuple  {
         typedef typename GenTuple<I-1, Arg, Args..., Arg>::type type;
     };
@@ -547,7 +547,7 @@ struct Closure : public detail::HasMetaTable<Closure> {
                 void,
                 typename std::conditional<rvals == 1,
                     // true => auto cleanable variant
-                    Variant<lua_State*, int>,
+                    Variant<>,
                     typename detail::GenTuple<rvals>::type
                 >::type
             >::type type;
@@ -602,7 +602,7 @@ template<typename T>
 ReturnProxy::operator T() && {
     auto self = this->self;
     call(1);
-    return Variant<lua_State*,int>(self->state, lua_gettop(self->state));
+    return Variant<>(self->state, lua_gettop(self->state));
 }
 
 template<>
@@ -618,7 +618,7 @@ inline typename Closure::Rvals<1>::type Closure::__return__<1>() {
 #ifndef LUAMM_MAX_RETVALUES
 #define LUAMM_MAX_RETVALUES 15
 #endif
-#define LUAMM_X(n) Variant<lua_State*, int>(state, -n)BOOST_PP_COMMA_IF(BOOST_PP_SUB(n,1))
+#define LUAMM_X(n) Variant<>(state, -n)BOOST_PP_COMMA_IF(BOOST_PP_SUB(n,1))
 #define LUAMM_Y(a, b, c) LUAMM_X(BOOST_PP_SUB(c, b))
 #define LUAMM_ARGS(n) BOOST_PP_REPEAT(n, LUAMM_Y, n)
 #define LUAMM_RET(_a, n, _b) template<>\
@@ -973,9 +973,9 @@ public:
     }
 
     template<typename T>
-    Variant<lua_State*,int> push(const T& value) {
+    Variant<> push(const T& value) {
         VarPusher<T>::push(ptr(), value);
-        return Variant<lua_State*,int>(ptr(),-1);
+        return Variant<>(ptr(),-1);
     }
 
     Table newTable(int narray = 0, int nother = 0) {
@@ -990,8 +990,8 @@ public:
         return UserData(ptr(), -1);
     }
 
-    Variant<lua_State*, int> operator[](int pos) {
-        return Variant<lua_State*, int>(ptr(), pos);
+    Variant<> operator[](int pos) {
+        return Variant<>(ptr(), pos);
     }
 
     Variant<lua_State*, std::string> operator[](const std::string& key) {
@@ -1002,7 +1002,7 @@ public:
         return lua_gettop(ptr());
     }
 
-    Variant<lua_State*,int> gettop() {
+    Variant<> gettop() {
         return this->operator[](top());
     }
 
@@ -1127,8 +1127,8 @@ struct ParameterListTransformer<T, Data, ParaList, 0, Args...> {
 } // end namespace detail
 
 template<>
-struct VarProxy<Variant<lua_State*,int>> : VarBase {
-    static bool push(const Variant<lua_State*,int>& var) {
+struct VarProxy<Variant<>> : VarBase {
+    static bool push(const Variant<>& var) {
         lua_pushnil(var.state);
         lua_copy(var.state, var.index, -1);
         return true;
