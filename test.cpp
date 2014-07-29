@@ -39,181 +39,222 @@ using namespace luamm;
 using namespace std;
 using namespace boost::mpl;
 
-    BOOST_MPL_ASSERT(( detail::PredPush<std::string, const char*> ));
-    BOOST_MPL_ASSERT(( detail::PredPush<std::string, const char*&> ));
-    BOOST_MPL_ASSERT(( detail::PredPush<std::string, const char*&&> ));
-    BOOST_MPL_ASSERT(( detail::PredPush<std::string, char const * const &> ));
-    BOOST_MPL_ASSERT(( detail::PredPush<std::string, char[2]> ));
-    BOOST_MPL_ASSERT(( detail::PredPush<std::string, const char[2]> ));
-    BOOST_MPL_ASSERT(( detail::PredPush<std::string, std::string&> ));
-    BOOST_MPL_ASSERT(( detail::PredPush<std::string, std::string&&> ));
-    BOOST_MPL_ASSERT(( detail::PredPush<std::string, const std::string&> ));
+BOOST_MPL_ASSERT(( detail::PredPush<std::string, const char*> ));
+BOOST_MPL_ASSERT(( detail::PredPush<std::string, const char*&> ));
+BOOST_MPL_ASSERT(( detail::PredPush<std::string, const char*&&> ));
+BOOST_MPL_ASSERT(( detail::PredPush<std::string, char const * const &> ));
+BOOST_MPL_ASSERT(( detail::PredPush<std::string, char[2]> ));
+BOOST_MPL_ASSERT(( detail::PredPush<std::string, const char[2]> ));
+BOOST_MPL_ASSERT(( detail::PredPush<std::string, std::string&> ));
+BOOST_MPL_ASSERT(( detail::PredPush<std::string, std::string&&> ));
+BOOST_MPL_ASSERT(( detail::PredPush<std::string, const std::string&> ));
 
-    BOOST_MPL_ASSERT(( detail::PredPush<Number, int> ));
-    BOOST_MPL_ASSERT(( detail::PredPush<Number, unsigned int> ));
-    BOOST_MPL_ASSERT(( detail::PredPush<Number, long> ));
-    BOOST_MPL_ASSERT(( detail::PredPush<Number, double> ));
+BOOST_MPL_ASSERT(( detail::PredPush<Number, int> ));
+BOOST_MPL_ASSERT(( detail::PredPush<Number, unsigned int> ));
+BOOST_MPL_ASSERT(( detail::PredPush<Number, long> ));
+BOOST_MPL_ASSERT(( detail::PredPush<Number, double> ));
 
-    BOOST_MPL_ASSERT(( detail::PredGet<Number, Number> ));
-    BOOST_MPL_ASSERT(( detail::PredGet<Number, double> ));
-    BOOST_MPL_ASSERT(( detail::PredGet<Number, int> ));
-    BOOST_MPL_ASSERT(( detail::PredGet<Number, bool> ));
-    BOOST_MPL_ASSERT(( not_<detail::PredGet<Number, void*>> ));
+BOOST_MPL_ASSERT(( detail::PredGet<Number, Number> ));
+BOOST_MPL_ASSERT(( detail::PredGet<Number, double> ));
+BOOST_MPL_ASSERT(( detail::PredGet<Number, int> ));
+BOOST_MPL_ASSERT(( detail::PredGet<Number, bool> ));
+BOOST_MPL_ASSERT(( not_<detail::PredGet<Number, void*>> ));
 
 
-    BOOST_MPL_ASSERT(( detail::PredGet<const char*, string> ));
-    BOOST_MPL_ASSERT(( detail::PredGet<const char*, const char*> ));
-    BOOST_MPL_ASSERT(( not_<detail::PredGet<const char*, char*>> ));
+BOOST_MPL_ASSERT(( detail::PredGet<const char*, string> ));
+BOOST_MPL_ASSERT(( detail::PredGet<const char*, const char*> ));
+BOOST_MPL_ASSERT(( not_<detail::PredGet<const char*, char*>> ));
 
-    BOOST_MPL_ASSERT((std::is_same<
-                        detail::SelectImpl<detail::PredPush, const char*>::type,
-                        string
-                      >));
+BOOST_MPL_ASSERT((std::is_same<
+                    detail::SelectImpl<detail::PredPush, const char*>::type,
+                    string
+                  >));
 
-    BOOST_MPL_ASSERT((std::is_same<
-                        detail::SelectImpl<detail::PredGet, string>::type,
-                        const char*
-                      >));
+BOOST_MPL_ASSERT((std::is_same<
+                    detail::SelectImpl<detail::PredGet, string>::type,
+                    const char*
+                  >));
 
-    BOOST_MPL_ASSERT((std::is_same<
-                        detail::SelectImpl<detail::PredGet, int>::type,
-                        Number
-                      >));
+BOOST_MPL_ASSERT((std::is_same<
+                    detail::SelectImpl<detail::PredGet, int>::type,
+                    Number
+                  >));
 
-    BOOST_MPL_ASSERT((std::is_same<
-                        detail::SelectImpl<detail::PredGet, unsigned int>::type,
-                        Number
-                      >));
+BOOST_MPL_ASSERT((std::is_same<
+                    detail::SelectImpl<detail::PredGet, unsigned int>::type,
+                    Number
+                  >));
+
+BOOST_MPL_ASSERT(( std::is_same<VarPusher<Table>::type, Table> ));
+
+
+class TestLuaState : public NewState {
+public:
+    TestLuaState() : NewState() {}
+    ~TestLuaState() {
+        BOOST_CHECK_EQUAL(top(), 0);
+    }
+};
+
+BOOST_AUTO_TEST_CASE( push )
+{
+    TestLuaState lua;
+    {
+        int num = rand();
+        lua.push(num);
+        BOOST_CHECK_EQUAL(Number(lua.gettop()), num);
+    }
+}
+
+BOOST_AUTO_TEST_CASE( get_top_by_negative_index )
+{
+    TestLuaState lua;
+    {
+        int num = rand();
+        lua.push(num);
+        BOOST_CHECK_EQUAL(Number(lua[-1]), num);
+    }
+    // top is not popped, because negative index cannot be equal to top
+    // index
+    BOOST_CHECK_EQUAL(lua.top(), 1);
+    lua.pop();
+}
+
+BOOST_AUTO_TEST_CASE( read_c_string )
+{
+    TestLuaState lua;
+    {
+        lua.push("hello");
+        BOOST_CHECK_EQUAL((const char*)lua.gettop(), "hello");
+    }
+}
+
+BOOST_AUTO_TEST_CASE( read_bool )
+{
+    TestLuaState lua;
+    {
+        lua.push(true);
+        BOOST_REQUIRE( bool(lua.gettop()) );
+    }
+}
+
+BOOST_AUTO_TEST_CASE( access_c_string_from_table )
+{
+    TestLuaState lua;
+    {
+        Table tbl = lua.newTable();
+        tbl[1] = "hello";
+        BOOST_CHECK_EQUAL((const char*)tbl[1], "hello");
+    }
+}
 
 static int cfunction(lua_State* st) {
     return 1;
 }
 
-BOOST_AUTO_TEST_CASE( Basic_Load )
+BOOST_AUTO_TEST_CASE( read_write_c_function_pointer_from_table )
 {
-    NewState lua;
-    lua.openlibs();
-
-    int num = rand();
-    lua.push(num);
-    BOOST_CHECK_EQUAL(Number(lua[-1]), num);
-    BOOST_CHECK_EQUAL(lua.top(), 1);
-
-    lua.push("hello");
-    BOOST_CHECK_EQUAL((const char*)lua[-1], "hello");
-    BOOST_CHECK_EQUAL(lua.top(), 2);
-
-    lua.push(true);
-    BOOST_REQUIRE( bool(lua[-1]) );
-    BOOST_CHECK_EQUAL(lua.top(), 3);
-
+    TestLuaState lua;
     {
         Table tbl = lua.newTable();
-        tbl[1] = "hello";
-        BOOST_CHECK_EQUAL(lua.top(), 4);
-
-        BOOST_CHECK_EQUAL((const char*)tbl[1], "hello");
-        BOOST_CHECK_EQUAL(lua.top(), 4);
-
-        tbl[2] = cfunction;
-        CFunction cfunc = tbl[2];
-        BOOST_CHECK_EQUAL(cfunc, cfunction);
-        BOOST_CHECK_EQUAL(lua.top(), 4);
-
-        BOOST_MPL_ASSERT(( std::is_same<VarPusher<Table>::type, Table> ));
-        auto math = lua["math"];
-        BOOST_CHECK_EQUAL(math.type(), LUA_TTABLE);
-
-        Table math_tab = math;
-        BOOST_CHECK_EQUAL(math_tab.index, 5);
-        BOOST_CHECK_EQUAL(lua.top(), 5);
-
-        auto pi = math_tab["pi"];
-        BOOST_CHECK_EQUAL(pi.type(), LUA_TNUMBER);
-        BOOST_CHECK_EQUAL(lua.top(), 5);
-
-        Number pino = pi;
-        BOOST_REQUIRE(pino > 3.14 && pino < 3.15);
-        BOOST_CHECK_EQUAL(lua.top(), 5);
-
-        // has 1 upvalue
-        math_tab["xxx"] = CClosure(cfunction, 1);
-        BOOST_CHECK_EQUAL(lua.top(), 5);
-
-        BOOST_REQUIRE(math_tab["xxx"].iscfun());
-        Closure func = math_tab["xxx"];
-        BOOST_CHECK_EQUAL(lua.top(), 6);
-
-        func[1] = "nice";
-        BOOST_CHECK_EQUAL(lua.top(), 6);
-
-        const char *nice = func[1];
-        BOOST_CHECK_EQUAL(lua.top(), 6);
-        BOOST_CHECK_EQUAL(nice, "nice");
+        tbl["cfunction"] = cfunction;
+        BOOST_CHECK_EQUAL(CFunction(tbl["cfunction"]), cfunction);
     }
+}
 
-    BOOST_CHECK_EQUAL(lua.top(), 3);
+BOOST_AUTO_TEST_CASE( check_internal_math_library )
+{
+    TestLuaState lua;
+    lua.openlibs();
+    auto math = lua["math"];
+    BOOST_CHECK_EQUAL(math.type(), LUA_TTABLE);
+}
 
+BOOST_AUTO_TEST_CASE( use_internal_math_library )
+{
+    TestLuaState lua;
+    lua.openlibs();
+    Table math = lua["math"];
+    Number pi = math["pi"];
+    BOOST_REQUIRE(pi > 3.14 && pi < 3.15);
+}
+
+BOOST_AUTO_TEST_CASE( read_write_closure_upvalue )
+{
+    TestLuaState lua;
+    {
+        // has 1 upvalue
+        lua.push(CClosure(cfunction, 1));
+        Closure closure = lua[1];
+        closure[1] = "uvval";
+        BOOST_CHECK_EQUAL((const char*)closure[1], "uvval");
+    }
+}
+
+BOOST_AUTO_TEST_CASE( getset_metatable )
+{
+    TestLuaState lua;
     {
         Table t = lua.newTable();
-        BOOST_CHECK_EQUAL(t.index, 4);
 
         Table mt = lua.newTable();
-        BOOST_CHECK_EQUAL(mt.index, 5);
 
         t.setmetatable(mt);
         Table _mt = t.getmetatable();
         BOOST_REQUIRE(mt == _mt);
     }
+}
 
-    BOOST_CHECK_EQUAL(lua.top(), 3);
-
+BOOST_AUTO_TEST_CASE( read_write_userdata )
+{
+    TestLuaState lua;
     {
-        Table math = lua["math"];
+        Table tab = lua.newTable();
         UserData ud = lua.newUserData<double>(100);
-        math["userdata"] = ud;
+        tab["ud"] = ud;
+
+        UserData ud_2 = tab["ud"];
+        BOOST_CHECK_EQUAL(ud_2.to<double>(), 100);
     }
+}
 
-    BOOST_CHECK_EQUAL(lua.top(), 3);
-
+BOOST_AUTO_TEST_CASE( read_write_light_userdata )
+{
+    TestLuaState lua;
     {
-        Table math = lua["math"];
-        UserData ud = math["userdata"];
-        BOOST_CHECK_EQUAL(ud.to<double>(), 100);
+        Table tab = lua.newTable();
+        tab["lud"] = static_cast<void*>(new double(101));
+        double *p = static_cast<double*>((void*)tab["lud"]);
+        BOOST_CHECK_EQUAL(*p, 101);
+        delete p;
     }
+}
 
-    BOOST_CHECK_EQUAL(lua.top(), 3);
-
+BOOST_AUTO_TEST_CASE( call_lua_math_log )
+{
+    TestLuaState lua;
     {
-        Table math = lua["math"];
-        math["userdata"] = static_cast<void*>(new double(101));
-    }
-    BOOST_CHECK_EQUAL(lua.top(), 3);
-
-    {
-        Table math = lua["math"];
-        void *p = math["userdata"];
-        auto pp = static_cast<double*>(p);
-        BOOST_CHECK_EQUAL(*pp, 101);
-        delete pp;
-    }
-    BOOST_CHECK_EQUAL(lua.top(), 3);
-
-    {
-        Table math = lua["math"];
+        Table math = lua.open(luaopen_math);
         Closure log = math["log"];
         Number res = log(100);
         BOOST_CHECK_EQUAL(res, std::log(100));
     }
-    BOOST_CHECK_EQUAL(lua.top(), 3);
+}
 
+BOOST_AUTO_TEST_CASE( call_lua_math_log_through_luac )
+{
+    TestLuaState lua;
+    lua["math"] = lua.open(luaopen_math);
     {
         Closure log = lua.newFunc("return math.log(...)");
-        // lua not distinguishes string and number
+        // lua automatically convert string to number
         BOOST_CHECK_EQUAL(Number( log("100") ), std::log(100));
     }
-    BOOST_CHECK_EQUAL(lua.top(), 3);
+}
 
+BOOST_AUTO_TEST_CASE( call_light_cfunction )
+{
+    TestLuaState lua;
     {
         // light cfunction (no upvalue
         Closure cl = lua.push(CClosure(
@@ -230,20 +271,25 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         Number in = rand();
         BOOST_CHECK_EQUAL( Number(cl(in)), in+1 );
     }
-    BOOST_CHECK_EQUAL(lua.top(), 3);
+}
 
+
+BOOST_AUTO_TEST_CASE( call_cpp_lambda )
+{
+    TestLuaState lua;
     {
         Closure cl = lua.newCallable([](State& st, Number num) -> Number {
             return num + 7777;
         });
-        BOOST_CHECK_EQUAL(lua.top(), 4);
-
         Number in = rand();
         Number num = cl(in);
         BOOST_CHECK_EQUAL(num, in + 7777);
     }
-    BOOST_CHECK_EQUAL(lua.top(), 3);
+}
 
+BOOST_AUTO_TEST_CASE( call_cpp_lambda_and_check_side_effect )
+{
+    TestLuaState lua;
     { // return void
         Closure cl = lua.newCallable([](State& st, string&& key, Number num) {
             st[key] = num;
@@ -251,8 +297,13 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         cl("hello", 12);
         BOOST_CHECK_EQUAL(Number(lua["hello"]), 12);
     }
-    BOOST_CHECK_EQUAL(lua.top(), 3);
+}
 
+
+BOOST_AUTO_TEST_CASE( lambda_return_multiple_values )
+{
+    TestLuaState lua;
+    lua.openlibs();
     { // simple multiple return
         Closure cl = lua.newCallable([](State& st, Number a, Number b) {
             return make_tuple(b, a);
@@ -260,29 +311,34 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         lua["test"] = cl;
         Closure recv = lua.newFunc(
                 "local a, b = test(11, 12); return tostring(a)");
-        Number ret  = recv();
+        Number ret = recv();
         BOOST_CHECK_EQUAL(ret, 12);
     }
-    BOOST_CHECK_EQUAL(lua.top(), 3);
+}
 
-    { // simple multiple return
+BOOST_AUTO_TEST_CASE( multiple_return_values )
+{
+    TestLuaState lua;
+    {
+        // multiple return values cannot be automatically destructed from
+        // lua stack, so make a new scope
         auto scope = lua.newScope();
-
         Closure cl = lua.newCallable([](State& st, Number a, Number b) {
             return make_tuple(b, a);
         });
 
         std::tuple<int, int> ret = cl(11, 12);
-
-        BOOST_CHECK_EQUAL(lua.top(), 6);
         BOOST_CHECK_EQUAL(std::get<0>(ret), 12);
         BOOST_CHECK_EQUAL(std::get<1>(ret), 11);
     }
+}
 
-    BOOST_CHECK_EQUAL(lua.top(), 3);
-
+BOOST_AUTO_TEST_CASE( lambda_with_short_arglist )
+    // no State& in the beginning of argument list
+{
+    TestLuaState lua;
     {
-        Closure cl = lua.newCallable([](State& st, Table&& pair) -> Number {
+        Closure cl = lua.newCallable([](Table&& pair) -> Number {
             return Number(pair["num1"]) + Number(pair["num2"]);
         });
 
@@ -293,7 +349,11 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         Number num = cl(in);
         BOOST_CHECK_EQUAL(num, 25);
     }
+}
 
+BOOST_AUTO_TEST_CASE( tie_multiple_return_values_to_tuple )
+{
+    TestLuaState lua;
     {
         auto scope = lua.newScope();
         Closure cl = lua.newFunc("return 1, 2, 3, 5, 8, 13;");
@@ -301,8 +361,11 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         luamm::tie(a, b, ignore, d, e, f) = cl.call();
         BOOST_CHECK_EQUAL(a+b+d+e+f, 29);
     }
-    BOOST_CHECK_EQUAL(lua.top(), 3);
+}
 
+BOOST_AUTO_TEST_CASE( trival_lambda )
+{
+    TestLuaState lua;
     {
         Closure cl = lua.newCallable([](int i, int j) {
                 return i*j;
@@ -310,9 +373,11 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         BOOST_CHECK_EQUAL(Number(cl(2,4)), 8);
         BOOST_CHECK_EQUAL(Number(cl(200,300)), 60000);
     }
-    BOOST_CHECK_EQUAL(lua.top(), 3);
+}
 
-    lua.settop(0);
+BOOST_AUTO_TEST_CASE( cpp_class_to_lua_table )
+{
+    TestLuaState lua;
     {
         // test module system
         struct Hello {};
@@ -322,12 +387,18 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
             .init()
         );
         BOOST_CHECK_EQUAL((const char*)mod["className"], "hello");
-        Closure add = lua.newFunc(
-   "local hello, a,b = ...; local obj = hello(); return obj.add(a, b)");
+        Closure add = lua.newFunc(R"==(
+            local hello, a,b = ...
+            local obj = hello()
+            return obj.add(a, b)
+        )==");
         BOOST_CHECK_EQUAL(Number(add(mod, 1, 2)), 3);
     }
-    BOOST_CHECK_EQUAL(lua.top(), 0);
+}
 
+BOOST_AUTO_TEST_CASE( class_member_function_binding )
+{
+    TestLuaState lua;
     {
         // simple class binding
         struct Counter {
@@ -351,8 +422,12 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         )==");
         BOOST_CHECK_EQUAL(Number(testcl()), 1100);
     }
-    BOOST_CHECK_EQUAL(lua.top(), 0);
+}
 
+
+BOOST_AUTO_TEST_CASE( class_member_setter_getter_auto_generator )
+{
+    TestLuaState lua;
     {
         // class member getter and setter
         struct Data {
@@ -378,8 +453,12 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         )==")(d);
         BOOST_CHECK_EQUAL(result, 10);
     }
-    BOOST_CHECK_EQUAL(lua.top(), 0);
+}
 
+BOOST_AUTO_TEST_CASE( class_attribute_binding )
+{
+    TestLuaState lua;
+    lua["_G"] = lua.open(luaopen_base);
     {
         auto scope = lua.newScope();
         struct Data {
@@ -400,7 +479,11 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
             assert(d.num == 10, "d is set to 10")
         )==")(mod);
     }
+}
 
+BOOST_AUTO_TEST_CASE( long_arglist )
+{
+    TestLuaState lua;
     {
         // long parameter list
         auto scope = lua.newScope();
@@ -415,6 +498,4 @@ BOOST_AUTO_TEST_CASE( Basic_Load )
         BOOST_CHECK_EQUAL(d, 4);
         BOOST_CHECK_EQUAL(e, 5);
     }
-    BOOST_CHECK_EQUAL(lua.top(), 0);
 }
-

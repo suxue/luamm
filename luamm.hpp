@@ -1002,6 +1002,10 @@ public:
         return lua_gettop(ptr());
     }
 
+    Variant<lua_State*,int> gettop() {
+        return this->operator[](top());
+    }
+
     void openlibs() {
         luaL_openlibs(ptr());
     }
@@ -1012,7 +1016,11 @@ public:
     }
 
     Table open(int (*lib)(lua_State*)) {
-        return  Closure(push(lib))();
+        Closure loader(push(lib));
+        Table mod = loader();
+        lua_copy(ptr(), mod.index, loader.index);
+        loader.index = 0;
+        return this->operator[](-2);
     }
 
     template<typename T>
