@@ -1,6 +1,6 @@
-AC_INIT([luamm], [0.1.2 foreign])
+AC_INIT([luamm], [0.3 foreign])
 AC_CONFIG_AUX_DIR([build-aux])
-AC_CONFIG_MACRO_DIR(autoconf-common/m4)
+AC_CONFIG_MACRO_DIR(autoconf-common)
 
 MY_COMMON
 

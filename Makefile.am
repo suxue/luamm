@@ -1,4 +1,4 @@
-ACLOCAL_AMFLAGS = -I autoconf-common/m4
+ACLOCAL_AMFLAGS = -I autoconf-common
 
 if BUILD_DEMOS
 SUBDIRS = demos/
