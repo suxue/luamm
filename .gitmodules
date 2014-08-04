@@ -6,6 +6,3 @@
 	path = autoconf-common
 	url = https://gist.github.com/4ff6e8bd5612f77be882.git
     ignore = dirty
-[submodule "autoconf-common"]
-	path = autoconf-common
-	url = https://gist.github.com/4ff6e8bd5612f77be882.git
