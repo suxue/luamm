@@ -67,10 +67,10 @@ namespace luamm {
             enum { value = 0 };
         };
 
-        template<typename Container, typename KeyStore>
+        template<typename Container, typename Key>
         struct AutoCleaner {
             template<typename T>
-            static void clean(const Container& _, const KeyStore& k) {}
+            static void clean(const Container& _, const Key& k) {}
         };
 
         template<>
@@ -83,7 +83,6 @@ namespace luamm {
                 }
             }
         };
-
     }
 
 
@@ -123,11 +122,11 @@ template<typename LuaValue>
 struct VarProxy;
 
 /* router class for read/write/update a lua variable */
-template<typename Container = lua_State*, typename Key = int, typename KeyStore = Key>
+template<typename Container = lua_State*, typename Key = int>
 class Variant  {
     friend struct VarProxy<Variant<>>;
 private:
-    KeyStore index;
+    Key index;
     Container state;
 public:
     Variant(Container st, const Key& i)
@@ -135,13 +134,13 @@ public:
 
     template<typename T>
     T to() const {
-        return KeyGetter<Container, KeyStore, T>::get(state, index);
+        return KeyGetter<Container, Key, T>::get(state, index);
     }
 
     template<typename T>
     operator T() && {
         T o = to<T>();
-        detail::AutoCleaner<Container, KeyStore>::template clean<T>(state, index);
+        detail::AutoCleaner<Container, Key>::template clean<T>(state, index);
         return o;
     }
 
@@ -152,7 +151,7 @@ public:
 
     template<typename T>
     Variant& operator=(const T& var) {
-        KeySetter<Container, KeyStore, T>::set(state, index, var);
+        KeySetter<Container, Key, T>::set(state, index, var);
         return *this;
     }
 
@@ -162,7 +161,7 @@ public:
     }
 
     int type() {
-        return KeyTyper<Container, KeyStore>::type(state, index);
+        return KeyTyper<Container, Key>::type(state, index);
     }
 
     bool isnum() { return type() == LUA_TNUMBER; }
@@ -177,7 +176,7 @@ public:
 
     bool iscfun() {
         try {
-            KeyGetter<Container, KeyStore, CFunction>::get(state, index);
+            KeyGetter<Container, Key, CFunction>::get(state, index);
         } catch (RuntimeError e) {
             return false;
         }
@@ -193,7 +192,7 @@ struct Table {
     ~Table();
 
     template<typename T>
-    Variant<Table*, T, typename VarPusher<T>::type> operator[](const T& k);
+    Variant<Table*, typename VarPusher<T>::type> operator[](const T& k);
 
     void setmetatable(const Table& metatab);
     Table getmetatable();
@@ -1308,8 +1307,8 @@ inline UserData::~UserData() { detail::cleanup(state, index); }
 inline Closure::~Closure() { detail::cleanup(state, index); }
 
 template<typename T>
-Variant<Table*, T, typename VarPusher<T>::type> Table::operator[](const T& k) {
-    return  Variant<Table*, T, typename VarPusher<T>::type>(this, k);
+Variant<Table*, typename VarPusher<T>::type> Table::operator[](const T& k) {
+    return  Variant<Table*, typename VarPusher<T>::type>(this, k);
 }
 
 inline void Table::setmetatable(const Table& metatab) {
